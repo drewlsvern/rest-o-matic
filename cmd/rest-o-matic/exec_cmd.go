@@ -8,8 +8,8 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"rest-o-matic/internal/config"
-	"rest-o-matic/internal/execution"
+	"github.com/drewlsvern/rest-o-matic/internal/config"
+	"github.com/drewlsvern/rest-o-matic/internal/execution"
 )
 
 // execMessagePrefix marks every message exec produces itself, so it stays

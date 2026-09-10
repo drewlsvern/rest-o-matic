@@ -8,10 +8,10 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"rest-o-matic/internal/config"
-	"rest-o-matic/internal/execution"
-	"rest-o-matic/internal/schedule"
-	"rest-o-matic/internal/state"
+	"github.com/drewlsvern/rest-o-matic/internal/config"
+	"github.com/drewlsvern/rest-o-matic/internal/execution"
+	"github.com/drewlsvern/rest-o-matic/internal/schedule"
+	"github.com/drewlsvern/rest-o-matic/internal/state"
 )
 
 var tickCmd = &cobra.Command{

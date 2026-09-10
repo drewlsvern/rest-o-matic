@@ -6,7 +6,7 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"rest-o-matic/internal/config"
+	"github.com/drewlsvern/rest-o-matic/internal/config"
 )
 
 var validateCmd = &cobra.Command{

@@ -6,7 +6,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"rest-o-matic/internal/config"
+	"github.com/drewlsvern/rest-o-matic/internal/config"
 )
 
 func testConfig(t *testing.T, jobName string, job config.Job, repos map[string]config.Repository) *config.Config {

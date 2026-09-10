@@ -7,7 +7,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"rest-o-matic/internal/config"
+	"github.com/drewlsvern/rest-o-matic/internal/config"
 )
 
 func requireRestic(t *testing.T) {

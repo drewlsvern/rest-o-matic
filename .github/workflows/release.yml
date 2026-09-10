@@ -1,0 +1,58 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out code
+        uses: actions/checkout@v4
+        with:
+          # Full history and tags: required both by the ancestor-of-main
+          # check below and by GoReleaser's changelog generation, and by
+          # this project's own version reporting (debug.ReadBuildInfo)
+          # needing full tag history to resolve the exact tag rather than
+          # falling back to a pseudo-version.
+          fetch-depth: 0
+
+      - name: Validate tag format
+        run: |
+          TAG="${GITHUB_REF_NAME}"
+          if ! [[ "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]]; then
+            echo "::error::Tag '$TAG' does not match the required format vMAJOR.MINOR.PATCH[-prerelease] (e.g. v1.2.3 or v1.2.3-rc.1)"
+            exit 1
+          fi
+
+      - name: Fetch main for ancestor check
+        # actions/checkout's fetch scope with a tag trigger isn't guaranteed
+        # to include a usable origin/main ref, so fetch it explicitly rather
+        # than assume.
+        run: git fetch origin main
+
+      - name: Verify tagged commit is an ancestor of main
+        run: |
+          if ! git merge-base --is-ancestor "${GITHUB_SHA}" origin/main; then
+            echo "::error::Tag ${GITHUB_REF_NAME} (commit ${GITHUB_SHA}) is not reachable from main - refusing to release a commit that never went through the PR-gated build check"
+            exit 1
+          fi
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Run GoReleaser
+        uses: goreleaser/goreleaser-action@v6
+        with:
+          distribution: goreleaser
+          version: latest
+          args: release --clean
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

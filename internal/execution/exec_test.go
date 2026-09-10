@@ -4,8 +4,8 @@ import (
 	"context"
 	"testing"
 
-	"rest-o-matic/internal/config"
-	"rest-o-matic/internal/lock"
+	"github.com/drewlsvern/rest-o-matic/internal/config"
+	"github.com/drewlsvern/rest-o-matic/internal/lock"
 )
 
 // --- Lock-type classification (spec: Lock-Type-Based Concurrency Guard) ---

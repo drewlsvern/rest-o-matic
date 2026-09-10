@@ -1,4 +1,4 @@
-module rest-o-matic
+module github.com/drewlsvern/rest-o-matic
 
 go 1.25.0
 

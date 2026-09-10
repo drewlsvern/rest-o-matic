@@ -6,8 +6,8 @@ import (
 	"fmt"
 	"os/exec"
 
-	"rest-o-matic/internal/config"
-	"rest-o-matic/internal/lock"
+	"github.com/drewlsvern/rest-o-matic/internal/config"
+	"github.com/drewlsvern/rest-o-matic/internal/lock"
 )
 
 // Options bundles what RunJob needs beyond the config and job name.

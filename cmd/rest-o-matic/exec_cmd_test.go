@@ -6,7 +6,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"rest-o-matic/internal/execution"
+	"github.com/drewlsvern/rest-o-matic/internal/execution"
 )
 
 // setupExecWorkspace is like setupWorkspace but lets the caller add extra

@@ -5,8 +5,8 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"rest-o-matic/internal/execution"
-	"rest-o-matic/internal/state"
+	"github.com/drewlsvern/rest-o-matic/internal/execution"
+	"github.com/drewlsvern/rest-o-matic/internal/state"
 )
 
 var runCmd = &cobra.Command{

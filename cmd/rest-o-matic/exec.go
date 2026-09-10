@@ -5,10 +5,10 @@ import (
 	"fmt"
 	"time"
 
-	"rest-o-matic/internal/config"
-	"rest-o-matic/internal/execution"
-	"rest-o-matic/internal/lock"
-	"rest-o-matic/internal/state"
+	"github.com/drewlsvern/rest-o-matic/internal/config"
+	"github.com/drewlsvern/rest-o-matic/internal/execution"
+	"github.com/drewlsvern/rest-o-matic/internal/lock"
+	"github.com/drewlsvern/rest-o-matic/internal/state"
 )
 
 // executeWithSlot acquires a global concurrency slot (a cross-process

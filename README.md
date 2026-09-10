@@ -17,11 +17,32 @@ below.
 ## Installation
 
 ```sh
+go install github.com/drewlsvern/rest-o-matic/cmd/rest-o-matic@latest
+```
+
+Or build from source:
+
+```sh
 go build -o rest-o-matic ./cmd/rest-o-matic
 ```
 
 You'll also need the [`restic`](https://restic.net/) binary on your `PATH` —
 rest-o-matic shells out to it rather than reimplementing any backend logic.
+
+## Version
+
+Running `rest-o-matic` with no arguments shows a short version line above the
+usual command listing; `rest-o-matic --version` (or `-v`) shows a fuller
+build-info block — commit, commit time, whether the working tree was dirty at
+build time, and the Go version used to build it.
+
+The version is derived entirely from Go's own automatic build-info stamping
+(no hand-maintained version number, no build script required) — `go build`
+alone is enough for it to work correctly, both for an untagged dev build and,
+later, for a build made at a tagged release commit. The one thing it depends
+on is building from an actual `.git` checkout — building from a source
+archive with no `.git` directory (e.g. GitHub's "Download ZIP") won't have
+commit/time/dirty detail available.
 
 ## Config
 
@@ -163,6 +184,28 @@ restic is actually invoked, its own exit code is returned unchanged instead.
 Currently, a lock-blocked message just says the repository is "in use by
 another execution" — it doesn't yet say which job or process holds it.
 Surfacing that is a planned future enhancement, not implemented yet.
+
+## Releasing
+
+Every pull request into `main` runs a build/test check automatically
+(`.github/workflows/ci.yml`); merging is blocked until it passes.
+
+Cutting a release is a manual, deliberate action — nothing tags or publishes
+a release automatically just because something merged. To release:
+
+```sh
+git tag v1.2.3
+git push origin v1.2.3
+```
+
+Pushing a tag matching `vMAJOR.MINOR.PATCH` (optionally with a `-prerelease`
+suffix, e.g. `v1.2.3-rc.1`) triggers `.github/workflows/release.yml`, which
+validates the tag format, verifies the tagged commit is actually part of
+`main`'s history, then uses [GoReleaser](https://goreleaser.com/) to
+cross-compile binaries for `linux/amd64`, `linux/arm64`, `darwin/amd64`,
+`darwin/arm64`, and `windows/amd64`, publish them with checksums and a
+changelog (grouped by conventional-commit type) to a GitHub Release, and
+mark a hyphenated pre-release tag as a pre-release automatically.
 
 ## What's not here yet
 

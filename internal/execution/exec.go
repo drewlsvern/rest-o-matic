@@ -8,8 +8,8 @@ import (
 	"os/exec"
 	"strings"
 
-	"rest-o-matic/internal/config"
-	"rest-o-matic/internal/lock"
+	"github.com/drewlsvern/rest-o-matic/internal/config"
+	"github.com/drewlsvern/rest-o-matic/internal/lock"
 )
 
 // Reserved exit codes for when exec refuses to invoke restic at all. Chosen

@@ -11,7 +11,7 @@ import (
 	"os/exec"
 	"strconv"
 
-	"rest-o-matic/internal/config"
+	"github.com/drewlsvern/rest-o-matic/internal/config"
 )
 
 // ResticRunner invokes the restic binary. Path defaults to "restic" (looked

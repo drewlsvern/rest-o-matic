@@ -7,7 +7,7 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"rest-o-matic/internal/config"
+	"github.com/drewlsvern/rest-o-matic/internal/config"
 )
 
 var (
@@ -23,6 +23,19 @@ var rootCmd = &cobra.Command{
 }
 
 func init() {
+	appVersion := readBuildInfo()
+	// cobra's no-args/help output prints .Long (falling back to .Short) as
+	// a block above the Usage/Available Commands listing, and never
+	// references .Version at all (see design.md) - so the short version
+	// line is added as a second line of Long rather than by fighting
+	// cobra's usage template.
+	rootCmd.Long = "A simple Restic wrapper\n" + appVersion.shortLine()
+	// rootCmd.Version enables cobra's own --version/-v flag; the template
+	// override below makes it print the detailed block as-is instead of
+	// cobra's default one-line "<name> version <value>" wrapping.
+	rootCmd.Version = appVersion.detailedBlock()
+	rootCmd.SetVersionTemplate("{{.Version}}\n")
+
 	rootCmd.PersistentFlags().StringVar(&configPath, "config", "rest-o-matic.yaml", "path to the config file")
 	rootCmd.PersistentFlags().StringVar(&stateDir, "state-dir", ".rest-o-matic", "directory for state and lock files")
 	rootCmd.AddCommand(validateCmd, runCmd, tickCmd, execCmd)
