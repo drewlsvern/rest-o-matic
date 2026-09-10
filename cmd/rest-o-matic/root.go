@@ -25,7 +25,7 @@ var rootCmd = &cobra.Command{
 func init() {
 	rootCmd.PersistentFlags().StringVar(&configPath, "config", "rest-o-matic.yaml", "path to the config file")
 	rootCmd.PersistentFlags().StringVar(&stateDir, "state-dir", ".rest-o-matic", "directory for state and lock files")
-	rootCmd.AddCommand(validateCmd, runCmd, tickCmd)
+	rootCmd.AddCommand(validateCmd, runCmd, tickCmd, execCmd)
 }
 
 func statePath() string { return filepath.Join(stateDir, "state.json") }

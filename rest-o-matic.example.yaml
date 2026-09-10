@@ -1,0 +1,139 @@
+# rest-o-matic sample config
+#
+# Every option this version understands is shown below, commented out.
+# Copy what you need into rest-o-matic.yaml (or pass --config <path>) and
+# uncomment it.
+#
+# Four concepts make up a config: where to find each is noted alongside
+# each section.
+#   Source     - what to back up               (backups.<job>.source)
+#   Repository - where a restic repo lives      (repositories.<name>)
+#   Policy     - how/when a job runs            (policies.<name>)
+#   Hooks      - what runs before/after a job   (backups.<job>.hooks)
+
+# How many job executions may run at the same time, across the whole host.
+# Enforced across processes (a tick and a manual `run` share this cap), on
+# top of the separate rule that two jobs never touch the same repository at
+# once. Defaults to 2 if omitted.
+# max_concurrent: 2
+
+# ---------------------------------------------------------------------------
+# Policies: named, reusable schedule + retention. Referenced by name from a
+# job's `policy:` field. A job may override individual retention keys
+# without redeclaring the whole policy (see backups.postgres below).
+# ---------------------------------------------------------------------------
+# policies:
+#   hot:
+#     # One of: hourly, daily, weekly. Due-checking is calendar-aligned
+#     # (e.g. "hourly" fires near the top of the hour), not a fixed
+#     # countdown since the last run.
+#     schedule: hourly
+#
+#     # How many snapshots of each period to keep. Any subset of these keys
+#     # may be given; unmentioned keys are simply not enforced by restic.
+#     retention:
+#       hourly: 24
+#       daily: 30
+#       weekly: 12
+#       monthly: 6
+#       yearly: 2
+#
+#   cold:
+#     schedule: daily
+#     retention:
+#       daily: 7
+#       weekly: 4
+
+# ---------------------------------------------------------------------------
+# Repositories: where a restic repository lives. `url` is passed straight to
+# restic's -r flag, so any restic-supported backend works (local, s3, sftp,
+# rest-server, b2, azure, ...) - rest-o-matic does no backend-specific
+# validation of it.
+# ---------------------------------------------------------------------------
+# repositories:
+#   nas:
+#     backend: local          # informational; restic infers the backend from `url`
+#     url: /mnt/nas/restic-repo
+#
+#     # Exactly one of these three is typical for supplying the repo password:
+#     password: correct-horse-battery-staple
+#     # password_file: /run/secrets/restic-nas-password
+#     # password_command: "pass show restic/nas"
+#
+#   offsite:
+#     backend: s3
+#     url: "s3:https://s3.example.com/my-bucket/restic-repo"
+#     password_command: "pass show restic/offsite"
+#
+#     # Arbitrary extra environment variables to pass to restic - e.g.
+#     # backend-specific credentials. Any key/value pairs are accepted.
+#     env:
+#       AWS_ACCESS_KEY_ID: AKIA...
+#       AWS_SECRET_ACCESS_KEY: ...
+#
+#   sftp-backup:
+#     backend: sftp
+#     url: "sftp:user@host:/srv/restic-repo"
+#     password_file: /run/secrets/restic-sftp-password
+
+# ---------------------------------------------------------------------------
+# Backups: named jobs, each composing a Source, one or more Repositories, a
+# Policy, and optional Hooks.
+# ---------------------------------------------------------------------------
+# backups:
+#
+#   # A plain-file backup: the simplest job shape.
+#   documents:
+#     source:
+#       # v1 supports only a `paths` source: a list of filesystem paths.
+#       # Other source types (container, quadlet, command) are planned but
+#       # not implemented yet.
+#       paths:
+#         - ~/documents
+#         - ~/photos
+#
+#     policy: hot
+#
+#     # Bare repository names back up using the policy's retention as-is.
+#     repositories:
+#       - nas
+#       - offsite
+#
+#   # An application-aware backup, using hooks plus retention overrides.
+#   postgres:
+#     source:
+#       paths: ["/var/backups/postgres"]
+#
+#     hooks:
+#       # Run once per job execution, before any repository is backed up to.
+#       before:
+#         - "pg_dump mydb > /var/backups/postgres/mydb.sql"
+#       # Run once per job execution, after every repository has been
+#       # attempted - even if a before-hook or a backup failed, so cleanup
+#       # like this still happens.
+#       after:
+#         - "rm -f /var/backups/postgres/mydb.sql"
+#
+#     policy: hot
+#
+#     # Job-level override: merges key-by-key into the policy's retention.
+#     # Unmentioned keys (hourly, daily, monthly, yearly) still come from
+#     # the `hot` policy above.
+#     retention:
+#       weekly: 8
+#
+#     repositories:
+#       - nas
+#       # Mapping form: an optional per-repository retention override,
+#       # merged on top of the job-level result above. Lets destinations
+#       # with different storage costs keep different amounts of history.
+#       - repo: offsite
+#         retention:
+#           daily: 10
+#
+#     # Additive: applied alongside the automatic tag every snapshot always
+#     # gets (its job name, here "postgres") - never a replacement for it.
+#     # Automatic job tagging is what keeps `forget` safe when multiple
+#     # jobs share one repository (as `nas` does here, between `documents`
+#     # and `postgres`).
+#     tags: [prod]

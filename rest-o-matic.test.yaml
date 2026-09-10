@@ -1,0 +1,35 @@
+# Minimal working config for trying out rest-o-matic locally: one source
+# directory backed up to one local-directory restic repository.
+#
+# Before running rest-o-matic against this, the repository needs to exist -
+# rest-o-matic doesn't create repositories for you, only restic does:
+#
+#   mkdir -p test-data/source test-data/repo
+#   RESTIC_PASSWORD=test-password restic -r test-data/repo init
+#
+# Then, from the repo root:
+#
+#   go run ./cmd/rest-o-matic --config rest-o-matic.test.yaml validate
+#   go run ./cmd/rest-o-matic --config rest-o-matic.test.yaml run test
+#
+# (`run` triggers the job immediately regardless of schedule, which is more
+# useful than `tick` for manual testing.)
+
+policies:
+  daily:
+    schedule: daily
+    retention:
+      daily: 7
+
+repositories:
+  local:
+    backend: local
+    url: test-data/repo
+    password: test-password
+
+backups:
+  test:
+    source:
+      paths: ["test-data/source"]
+    policy: daily
+    repositories: [local]

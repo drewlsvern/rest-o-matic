@@ -26,7 +26,9 @@ rest-o-matic shells out to it rather than reimplementing any backend logic.
 ## Config
 
 By default rest-o-matic reads `rest-o-matic.yaml` in the current directory
-(override with `--config`). Here's the shape, covering both a plain-file
+(override with `--config`). See [`rest-o-matic.example.yaml`](rest-o-matic.example.yaml)
+for every option this version understands, commented out and annotated -
+copy what you need from it. Here's the shape, covering both a plain-file
 backup and an application-aware one with hooks and per-repository retention:
 
 ```yaml
@@ -117,6 +119,50 @@ processes (two overlapping ticks, or a tick and a manual `run`):
   restic's own repository locking makes this a correctness requirement, not
   just a performance one.
 - No more than `max_concurrent` jobs run at once, period.
+
+## Running raw restic commands
+
+For anything `backup`/`forget` don't cover — `snapshots`, `check`, `restore`,
+`mount`, `diff`, `dump`, and so on — `exec` injects a repository's connection
+info and passes the rest straight to the real `restic` binary:
+
+```sh
+rest-o-matic exec nas -- snapshots
+rest-o-matic exec nas -- restore a1b2c3d4 --target /tmp/restore
+```
+
+Output and the exit code are restic's own, completely unmodified — `exec` is
+a transparent passthrough, not a parsed/reinterpreted wrapper like
+`backup`/`forget`.
+
+Two safeguards apply, and they're independent of each other:
+
+- **Locking** mirrors restic's own shared/exclusive lock model rather than
+  an invented "dangerous command" list: read-oriented subcommands
+  (`snapshots`, `ls`, `find`, `diff`, `stats`, `cat`, `check`, `mount`,
+  `restore`) run immediately; everything else — including any subcommand
+  rest-o-matic doesn't recognize — waits for the same per-repository lock
+  `backup`/`forget` use, and is skipped (not run) if another execution
+  currently holds it. `--force` skips this wait only; restic's own internal
+  locking is still the real backstop either way.
+- **A tag-safety gate**, with no override flag at all: `forget` and `tag`
+  are refused outright — and `restore latest` refused when no explicit
+  snapshot ID is given — against a repository more than one job references,
+  unless your own command already includes `--tag`. This is what stops an
+  unscoped `forget --prune` from quietly pruning a different job's snapshots
+  out of a repository they share. `--force` does **not** bypass this — the
+  only ways around it are adding `--tag <job-name>` yourself, or running
+  `restic` directly outside of `exec`.
+
+When `exec` refuses to invoke restic at all, it uses one of two reserved
+exit codes instead of restic's own: `20` means it was blocked by the lock
+(retry later, or use `--force`), `21` means it was blocked by the
+tag-safety gate (the command itself needs `--tag`, not a retry). Whenever
+restic is actually invoked, its own exit code is returned unchanged instead.
+
+Currently, a lock-blocked message just says the repository is "in use by
+another execution" — it doesn't yet say which job or process holds it.
+Surfacing that is a planned future enhancement, not implemented yet.
 
 ## What's not here yet
 
