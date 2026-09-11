@@ -28,13 +28,13 @@
 
 ## 5. Manual, External Setup (Not a Repo File)
 
-- [ ] 5.1 In the GitHub repository's branch protection settings for `main`, require the CI workflow's status check and an approving review before the merge button unlocks — this is a GitHub UI/API setting, not something committed to the repo; do not consider this change complete until it's actually configured
+- [x] 5.1 In the GitHub repository's branch protection settings for `main`, require the CI workflow's status check and an approving review before the merge button unlocks — this is a GitHub UI/API setting, not something committed to the repo; do not consider this change complete until it's actually configured
 
 ## 6. End-to-End Verification
 
-- [ ] 6.1 Open a throwaway PR against `main` and confirm the CI workflow runs, and that the PR cannot merge until it passes
-- [ ] 6.2 Push a real test tag (e.g. a pre-release like `v0.0.1-rc.1`) and confirm: the release runs, all five platform archives and a checksums file are attached, the changelog is grouped by commit type, and the release is marked as a pre-release
-- [ ] 6.3 Download one of the release binaries and confirm `--version` reports the exact tag
+- [x] 6.1 Open a throwaway PR against `main` and confirm the CI workflow runs, and that the PR cannot merge until it passes
+- [x] 6.2 Push a real test tag (e.g. a pre-release like `v0.0.1-rc.1`) and confirm: the release runs, all five platform archives and a checksums file are attached, the changelog is grouped by commit type, and the release is marked as a pre-release
+- [x] 6.3 Download one of the release binaries and confirm `--version` reports the exact tag
 - [ ] 6.4 Once the repo is public, confirm `go install github.com/drewlsvern/rest-o-matic/cmd/rest-o-matic@<tag>` resolves and the installed binary reports the correct version with commit/commit-time/dirty shown as "unknown" (expected, per design.md)
 
 ## 7. Documentation

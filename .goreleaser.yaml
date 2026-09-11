@@ -29,6 +29,12 @@ archives:
 checksum:
   name_template: "checksums.txt"
 
+release:
+  # GoReleaser does NOT detect a tag's semver pre-release suffix (e.g.
+  # -rc.1) automatically - prerelease defaults to false. "auto" is required
+  # for a hyphenated tag to actually be marked as a pre-release on GitHub.
+  prerelease: auto
+
 changelog:
   sort: asc
   groups:
