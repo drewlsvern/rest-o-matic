@@ -16,11 +16,36 @@ below.
 
 ## Installation
 
+**Recommended for actually running backups** (a server, NAS, anything that
+isn't just your own dev machine): download the pre-built binary from the
+[Releases page](https://github.com/drewlsvern/rest-o-matic/releases). No Go
+toolchain needed on that machine, it's the exact artifact that was built and
+tested, checksums are provided, and `--version` on it reports full build
+provenance (real commit hash and build time — see "Version" below).
+
+```sh
+curl -LO https://github.com/drewlsvern/rest-o-matic/releases/download/<version>/rest-o-matic_<version>_<os>_<arch>.tar.gz
+curl -LO https://github.com/drewlsvern/rest-o-matic/releases/download/<version>/checksums.txt
+sha256sum --ignore-missing -c checksums.txt
+tar -xzf rest-o-matic_<version>_<os>_<arch>.tar.gz
+```
+
+(`<os>_<arch>` is one of `linux_amd64`, `linux_arm64`, `darwin_amd64`,
+`darwin_arm64`, or `windows_amd64` — see the Releases page for the current
+`<version>` and exact filenames; Windows archives are `.zip` instead.)
+
+**For quickly trying a version on a machine that already has Go installed**:
+
 ```sh
 go install github.com/drewlsvern/rest-o-matic/cmd/rest-o-matic@latest
 ```
 
-Or build from source:
+This compiles from source fetched through Go's module system rather than
+using the pre-built binary, so the only trade-off is that `--version`'s
+commit/build-time fields show as "unknown" (see "Version" below) — the
+version number itself is still always correct.
+
+Or build from source yourself:
 
 ```sh
 go build -o rest-o-matic ./cmd/rest-o-matic
