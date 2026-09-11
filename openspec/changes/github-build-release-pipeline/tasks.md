@@ -35,7 +35,7 @@
 - [x] 6.1 Open a throwaway PR against `main` and confirm the CI workflow runs, and that the PR cannot merge until it passes
 - [x] 6.2 Push a real test tag (e.g. a pre-release like `v0.0.1-rc.1`) and confirm: the release runs, all five platform archives and a checksums file are attached, the changelog is grouped by commit type, and the release is marked as a pre-release
 - [x] 6.3 Download one of the release binaries and confirm `--version` reports the exact tag
-- [ ] 6.4 Once the repo is public, confirm `go install github.com/drewlsvern/rest-o-matic/cmd/rest-o-matic@<tag>` resolves and the installed binary reports the correct version with commit/commit-time/dirty shown as "unknown" (expected, per design.md)
+- [x] 6.4 Once the repo is public, confirm `go install github.com/drewlsvern/rest-o-matic/cmd/rest-o-matic@<tag>` resolves and the installed binary reports the correct version with commit/commit-time/dirty shown as "unknown" (expected, per design.md)
 
 ## 7. Documentation
 
