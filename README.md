@@ -214,3 +214,17 @@ mark a hyphenated pre-release tag as a pre-release automatically.
 - Any systemd unit generation — that's reserved for the future Podman
   Quadlet integration specifically.
 - rest-o-matic managing your crontab for you — you own that entry.
+
+## License
+
+Copyright (C) 2026 Joel Drewlo
+
+rest-o-matic is free software: you can redistribute it and/or modify it
+under the terms of the GNU General Public License as published by the Free
+Software Foundation, either version 3 of the License, or (at your option)
+any later version.
+
+rest-o-matic is distributed in the hope that it will be useful, but WITHOUT
+ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
+FITNESS FOR A PARTICULAR PURPOSE. See the [GNU General Public License](LICENSE)
+for more details.
