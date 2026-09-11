@@ -16,7 +16,7 @@
 - [x] 3.2 Checkout step uses `fetch-depth: 0` (full history and tags)
 - [x] 3.3 Add a step that validates the pushed tag against strict semver (`vMAJOR.MINOR.PATCH` with an optional hyphenated pre-release suffix), aborting the job immediately with a clear error on a mismatch, before any other release work runs
 - [x] 3.4 Add a step that verifies the tagged commit is an ancestor of `origin/main` (`git merge-base --is-ancestor`), aborting the job immediately if it is not
-- [ ] 3.5 Unit-verify both checks by hand once the workflow exists: push a deliberately malformed tag and confirm it's rejected before any build step runs; push a tag on a commit not reachable from `main` and confirm it's rejected the same way
+- [x] 3.5 Unit-verify both checks by hand once the workflow exists: push a deliberately malformed tag and confirm it's rejected before any build step runs; push a tag on a commit not reachable from `main` and confirm it's rejected the same way
 
 ## 4. Release Workflow: Build, Archive, Checksum, Changelog
 
@@ -35,7 +35,7 @@
 - [x] 6.1 Open a throwaway PR against `main` and confirm the CI workflow runs, and that the PR cannot merge until it passes
 - [x] 6.2 Push a real test tag (e.g. a pre-release like `v0.0.1-rc.1`) and confirm: the release runs, all five platform archives and a checksums file are attached, the changelog is grouped by commit type, and the release is marked as a pre-release
 - [x] 6.3 Download one of the release binaries and confirm `--version` reports the exact tag
-- [ ] 6.4 Once the repo is public, confirm `go install github.com/drewlsvern/rest-o-matic/cmd/rest-o-matic@<tag>` resolves and the installed binary reports the correct version with commit/commit-time/dirty shown as "unknown" (expected, per design.md)
+- [x] 6.4 Once the repo is public, confirm `go install github.com/drewlsvern/rest-o-matic/cmd/rest-o-matic@<tag>` resolves and the installed binary reports the correct version with commit/commit-time/dirty shown as "unknown" (expected, per design.md)
 
 ## 7. Documentation
 
