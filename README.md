@@ -217,6 +217,18 @@ Currently, a lock-blocked message just says the repository is "in use by
 another execution" — it doesn't yet say which job or process holds it.
 Surfacing that is a planned future enhancement, not implemented yet.
 
+## Output colours
+
+When run in a terminal, rest-o-matic colours its own status labels: errors
+red, warnings orange, successes green. Only the label is coloured, and restic's
+own output is never touched. Colour is decided separately for stdout and
+stderr, so it's on only for a stream that's a terminal. Output going to cron
+mail, the systemd journal, a pipe or a file stays exactly as plain as before.
+
+- `--color=auto` (default): colour only on a terminal
+- `--color=always` / `--color=never`: force it on or off
+- `NO_COLOR=1`: turn it off, unless `--color=always` is given
+
 ## Releasing
 
 Every pull request into `main` runs a build/test check automatically

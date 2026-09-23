@@ -8,6 +8,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/drewlsvern/rest-o-matic/internal/color"
 	"github.com/drewlsvern/rest-o-matic/internal/config"
 	"github.com/drewlsvern/rest-o-matic/internal/execution"
 )
@@ -17,6 +18,11 @@ import (
 // command here, is passed through to the user unmodified and therefore
 // shares the same stream.
 const execMessagePrefix = "rest-o-matic: "
+
+// execErrorPrefix and execWarnPrefix are execMessagePrefix coloured by the
+// message's severity; with colour off they equal execMessagePrefix exactly.
+func execErrorPrefix() string { return color.Stderr.Error("rest-o-matic:") + " " }
+func execWarnPrefix() string  { return color.Stderr.Warn("rest-o-matic:") + " " }
 
 var execForce bool
 
@@ -50,18 +56,18 @@ restic directly if you really want to bypass this.`,
 		}
 		repo, ok := cfg.Repositories[repoName]
 		if !ok {
-			fmt.Fprintf(os.Stderr, "%srepository %q is not defined in the config\n", execMessagePrefix, repoName)
+			fmt.Fprintf(os.Stderr, "%srepository %q is not defined in the config\n", execErrorPrefix(), repoName)
 			os.Exit(1)
 		}
 		// Only the target repository is checked: problems elsewhere in the
 		// config must not block exec, which is the tool for repairing things.
 		repoErrs, repoWarns := config.CheckRepository(repoName, repo)
 		for _, w := range repoWarns {
-			fmt.Fprintf(os.Stderr, "%sconfig warning: %s\n", execMessagePrefix, w)
+			fmt.Fprintf(os.Stderr, "%sconfig warning: %s\n", execWarnPrefix(), w)
 		}
 		if len(repoErrs) > 0 {
 			for _, e := range repoErrs {
-				fmt.Fprintf(os.Stderr, "%sconfig error: %s\n", execMessagePrefix, e)
+				fmt.Fprintf(os.Stderr, "%sconfig error: %s\n", execErrorPrefix(), e)
 			}
 			os.Exit(1)
 		}
@@ -74,10 +80,10 @@ restic directly if you really want to bypass this.`,
 
 		switch result.Blocked {
 		case execution.BlockedByLock:
-			fmt.Fprintf(os.Stderr, "%srepository %q is in use by another execution; try again shortly, or pass --force to run anyway\n", execMessagePrefix, repoName)
+			fmt.Fprintf(os.Stderr, "%srepository %q is in use by another execution; try again shortly, or pass --force to run anyway\n", execWarnPrefix(), repoName)
 		case execution.BlockedByGate:
 			fmt.Fprintf(os.Stderr, "%srefusing to run %q against %q without --tag: shared by jobs: %s\n%sthis check cannot be bypassed with an option - add --tag <job-name>, or run restic directly outside of exec\n",
-				execMessagePrefix, resticArgs[0], repoName, strings.Join(result.SharingJobs, ", "), execMessagePrefix)
+				execErrorPrefix(), resticArgs[0], repoName, strings.Join(result.SharingJobs, ", "), execErrorPrefix())
 		}
 
 		os.Exit(result.ExitCode)

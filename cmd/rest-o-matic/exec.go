@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/drewlsvern/rest-o-matic/internal/color"
 	"github.com/drewlsvern/rest-o-matic/internal/config"
 	"github.com/drewlsvern/rest-o-matic/internal/execution"
 	"github.com/drewlsvern/rest-o-matic/internal/lock"
@@ -41,24 +42,24 @@ func executeAndRecord(cfg *config.Config, store *state.Store, name string, opts 
 
 func printResult(r execution.JobResult) {
 	if r.HookErr != nil {
-		fmt.Printf("job %s: FAILED (%v)\n", r.Job, r.HookErr)
+		fmt.Printf("job %s: %s (%v)\n", r.Job, color.Stdout.Error("FAILED"), r.HookErr)
 		return
 	}
-	status := "OK"
+	status := color.Stdout.Success("OK")
 	if !r.Success() {
-		status = "FAILED"
+		status = color.Stdout.Error("FAILED")
 	}
 	fmt.Printf("job %s: %s\n", r.Job, status)
 	for _, ro := range r.Repos {
 		switch {
 		case ro.Deferred:
-			fmt.Printf("  repository %s: deferred (locked by another execution)\n", ro.Repository)
+			fmt.Printf("  repository %s: %s (locked by another execution)\n", ro.Repository, color.Stdout.Warn("deferred"))
 		case ro.BackupErr != nil:
-			fmt.Printf("  repository %s: backup failed: %v\n", ro.Repository, ro.BackupErr)
+			fmt.Printf("  repository %s: %s: %v\n", ro.Repository, color.Stdout.Error("backup failed"), ro.BackupErr)
 		case ro.ForgetErr != nil:
-			fmt.Printf("  repository %s: backup ok, forget failed: %v\n", ro.Repository, ro.ForgetErr)
+			fmt.Printf("  repository %s: backup ok, %s: %v\n", ro.Repository, color.Stdout.Error("forget failed"), ro.ForgetErr)
 		default:
-			fmt.Printf("  repository %s: ok\n", ro.Repository)
+			fmt.Printf("  repository %s: %s\n", ro.Repository, color.Stdout.Success("ok"))
 		}
 	}
 }

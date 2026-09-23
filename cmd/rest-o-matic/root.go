@@ -7,12 +7,14 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/drewlsvern/rest-o-matic/internal/color"
 	"github.com/drewlsvern/rest-o-matic/internal/config"
 )
 
 var (
 	configPath string
 	stateDir   string
+	colorMode  string
 )
 
 var rootCmd = &cobra.Command{
@@ -20,6 +22,15 @@ var rootCmd = &cobra.Command{
 	Short:         "A simple Restic wrapper",
 	SilenceUsage:  true,
 	SilenceErrors: false,
+	// Colour is decided once, before any command prints anything; a flag
+	// parse error happens earlier and so is always reported plain.
+	PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
+		if err := color.Configure(colorMode); err != nil {
+			return err
+		}
+		cmd.Root().SetErrPrefix(color.Stderr.Error("Error:"))
+		return nil
+	},
 }
 
 func init() {
@@ -38,6 +49,7 @@ func init() {
 
 	rootCmd.PersistentFlags().StringVar(&configPath, "config", "rest-o-matic.yaml", "path to the config file")
 	rootCmd.PersistentFlags().StringVar(&stateDir, "state-dir", ".rest-o-matic", "directory for state and lock files")
+	rootCmd.PersistentFlags().StringVar(&colorMode, "color", "auto", "colour status output: auto, always, or never")
 	rootCmd.AddCommand(validateCmd, runCmd, tickCmd, execCmd)
 }
 
@@ -56,7 +68,7 @@ func loadAndValidate() (*config.Config, error) {
 	printConfigWarnings(res.Warnings)
 	if errs := res.Errors; len(errs) > 0 {
 		for _, e := range errs {
-			fmt.Fprintln(os.Stderr, "config error:", e)
+			fmt.Fprintln(os.Stderr, color.Stderr.Error("config error:"), e)
 		}
 		return nil, fmt.Errorf("%d config validation error(s)", len(errs))
 	}
@@ -67,6 +79,6 @@ func loadAndValidate() (*config.Config, error) {
 // errors so an error count stays the last line of output.
 func printConfigWarnings(warns []config.Warning) {
 	for _, w := range warns {
-		fmt.Fprintln(os.Stderr, "config warning:", w)
+		fmt.Fprintln(os.Stderr, color.Stderr.Warn("config warning:"), w)
 	}
 }

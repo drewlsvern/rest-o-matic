@@ -8,6 +8,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/drewlsvern/rest-o-matic/internal/color"
 	"github.com/drewlsvern/rest-o-matic/internal/config"
 	"github.com/drewlsvern/rest-o-matic/internal/execution"
 	"github.com/drewlsvern/rest-o-matic/internal/schedule"
@@ -39,12 +40,12 @@ once they've all finished.`,
 		for name := range cfg.Backups {
 			sched, err := cfg.EffectiveSchedule(name)
 			if err != nil {
-				fmt.Println("skipping job", name+":", err)
+				fmt.Println(color.Stdout.Warn("skipping job"), name+":", err)
 				continue
 			}
 			isDue, err := schedule.Due(sched, st.Jobs[name].LastRun, now)
 			if err != nil {
-				fmt.Println("skipping job", name+":", err)
+				fmt.Println(color.Stdout.Warn("skipping job"), name+":", err)
 				continue
 			}
 			if isDue {
@@ -66,7 +67,15 @@ once they've all finished.`,
 				failed++
 			}
 		}
-		fmt.Printf("tick: %d job(s) due, %d succeeded, %d failed\n", len(due), len(due)-failed, failed)
+		succeeded := fmt.Sprintf("%d succeeded", len(due)-failed)
+		if len(due)-failed > 0 {
+			succeeded = color.Stdout.Success(succeeded)
+		}
+		failedMsg := fmt.Sprintf("%d failed", failed)
+		if failed > 0 {
+			failedMsg = color.Stdout.Error(failedMsg)
+		}
+		fmt.Printf("tick: %d job(s) due, %s, %s\n", len(due), succeeded, failedMsg)
 		if failed > 0 {
 			return fmt.Errorf("%d/%d due job(s) failed", failed, len(due))
 		}
