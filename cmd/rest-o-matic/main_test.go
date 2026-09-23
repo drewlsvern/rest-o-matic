@@ -121,6 +121,67 @@ backups:
 	}
 }
 
+func TestCLI_ValidateRejectsRemoteBackendMissingPrefix(t *testing.T) {
+	workdir := t.TempDir()
+	bin := buildBinary(t)
+	configPath := filepath.Join(workdir, "bad.yaml")
+	content := `
+policies:
+  hot: {schedule: hourly, retention: {hourly: 24}}
+repositories:
+  offsite: {backend: s3, url: "host.example.com/bucket", password: x}
+backups:
+  documents:
+    source: {paths: ["/a"]}
+    policy: hot
+    repositories: [offsite]
+`
+	if err := os.WriteFile(configPath, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	_, stderr, code := runCLI(t, bin, workdir, "--config", configPath, "validate")
+	if code == 0 {
+		t.Fatal("expected non-zero exit code for an s3 url missing its prefix")
+	}
+	for _, want := range []string{"config error:", `repository "offsite"`, `"s3:"`} {
+		if !contains(stderr, want) {
+			t.Errorf("expected stderr to mention %q, got: %s", want, stderr)
+		}
+	}
+}
+
+func TestCLI_ValidateWarningsOnlyIsValid(t *testing.T) {
+	workdir := t.TempDir()
+	bin := buildBinary(t)
+	configPath := filepath.Join(workdir, "warn.yaml")
+	content := `
+policies:
+  hot: {schedule: hourly, retention: {hourly: 24}}
+repositories:
+  nas: {backend: local, url: backups/restic, password: x}
+backups:
+  documents:
+    source: {paths: ["/a"]}
+    policy: hot
+    repositories: [nas]
+`
+	if err := os.WriteFile(configPath, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	stdout, stderr, code := runCLI(t, bin, workdir, "--config", configPath, "validate")
+	if code != 0 {
+		t.Fatalf("expected exit 0 when only warnings are present, got %d (stderr: %s)", code, stderr)
+	}
+	if !contains(stderr, "config warning:") || !contains(stderr, "relative") {
+		t.Errorf("expected a relative-path warning on stderr, got: %s", stderr)
+	}
+	if !contains(stdout, "config is valid") {
+		t.Errorf("expected stdout to report the config as valid, got: %s", stdout)
+	}
+}
+
 func TestCLI_TickRunsDueJobThenNoOpsOnSecondTick(t *testing.T) {
 	requireRestic(t)
 	bin := buildBinary(t)

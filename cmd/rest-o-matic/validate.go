@@ -18,7 +18,9 @@ var validateCmd = &cobra.Command{
 			return err
 		}
 
-		errs := config.Validate(cfg)
+		res := config.Validate(cfg)
+		printConfigWarnings(res.Warnings)
+		errs := res.Errors
 		if len(errs) == 0 {
 			fmt.Println("config is valid")
 			return nil

@@ -45,14 +45,33 @@
 #       weekly: 4
 
 # ---------------------------------------------------------------------------
-# Repositories: where a restic repository lives. `url` is passed straight to
-# restic's -r flag, so any restic-supported backend works (local, s3, sftp,
-# rest-server, b2, azure, ...) - rest-o-matic does no backend-specific
-# validation of it.
+# Repositories: where a restic repository lives. `url` is passed to restic's
+# -r flag exactly as written - rest-o-matic never adds or rewrites any part of
+# it.
+#
+# `backend` is required and must agree with the url's scheme prefix:
+#
+#   backend         url must begin with
+#   -------         -------------------
+#   local           (no prefix - an absolute filesystem path)
+#   s3              s3:
+#   sftp            sftp:
+#   rest            rest:     (`rest-server` is accepted as an alias)
+#   swift           swift:
+#   b2              b2:
+#   azure           azure:
+#   gs              gs:
+#   rclone          rclone:
+#
+# A mismatch is a config error: without its prefix, restic silently treats a
+# remote url as a local directory and nothing reaches the remote. Any other
+# backend value only produces a warning and the url is used unchecked, as
+# does a relative local path (it resolves against whatever directory
+# rest-o-matic happens to run from).
 # ---------------------------------------------------------------------------
 # repositories:
 #   nas:
-#     backend: local          # informational; restic infers the backend from `url`
+#     backend: local          # required; must match the url (see table above)
 #     url: /mnt/nas/restic-repo
 #
 #     # Exactly one of these three is typical for supplying the repo password:

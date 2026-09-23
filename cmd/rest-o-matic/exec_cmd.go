@@ -48,8 +48,21 @@ restic directly if you really want to bypass this.`,
 		if err != nil {
 			return err
 		}
-		if _, ok := cfg.Repositories[repoName]; !ok {
+		repo, ok := cfg.Repositories[repoName]
+		if !ok {
 			fmt.Fprintf(os.Stderr, "%srepository %q is not defined in the config\n", execMessagePrefix, repoName)
+			os.Exit(1)
+		}
+		// Only the target repository is checked: problems elsewhere in the
+		// config must not block exec, which is the tool for repairing things.
+		repoErrs, repoWarns := config.CheckRepository(repoName, repo)
+		for _, w := range repoWarns {
+			fmt.Fprintf(os.Stderr, "%sconfig warning: %s\n", execMessagePrefix, w)
+		}
+		if len(repoErrs) > 0 {
+			for _, e := range repoErrs {
+				fmt.Fprintf(os.Stderr, "%sconfig error: %s\n", execMessagePrefix, e)
+			}
 			os.Exit(1)
 		}
 

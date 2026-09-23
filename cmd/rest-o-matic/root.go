@@ -46,16 +46,27 @@ func lockDir() string   { return filepath.Join(stateDir, "locks") }
 
 // loadAndValidate loads the config and rejects it if validation finds any
 // problems, printing every problem found rather than just the first.
+// Warnings are printed but never reject the config.
 func loadAndValidate() (*config.Config, error) {
 	cfg, err := config.Load(configPath)
 	if err != nil {
 		return nil, err
 	}
-	if errs := config.Validate(cfg); len(errs) > 0 {
+	res := config.Validate(cfg)
+	printConfigWarnings(res.Warnings)
+	if errs := res.Errors; len(errs) > 0 {
 		for _, e := range errs {
 			fmt.Fprintln(os.Stderr, "config error:", e)
 		}
 		return nil, fmt.Errorf("%d config validation error(s)", len(errs))
 	}
 	return cfg, nil
+}
+
+// printConfigWarnings writes each config warning to stderr, ahead of any
+// errors so an error count stays the last line of output.
+func printConfigWarnings(warns []config.Warning) {
+	for _, w := range warns {
+		fmt.Fprintln(os.Stderr, "config warning:", w)
+	}
 }
