@@ -3,9 +3,13 @@ package execution
 import (
 	"context"
 	"encoding/json"
+	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/drewlsvern/rest-o-matic/internal/config"
 )
@@ -129,4 +133,54 @@ func containsTag(tags []string, want string) bool {
 		}
 	}
 	return false
+}
+
+func TestBackup_CancelSendsSIGINT(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("uses a shell script as a fake restic")
+	}
+	dir := t.TempDir()
+	marker := filepath.Join(dir, "signal")
+	started := filepath.Join(dir, "started")
+	fake := filepath.Join(dir, "restic")
+	script := `#!/bin/sh
+trap 'echo INT > "$MARKER"; kill $child; exit 130' INT
+trap 'echo TERM > "$MARKER"; kill $child; exit 143' TERM
+touch "$STARTED"
+sleep 30 >/dev/null 2>&1 &
+child=$!
+wait
+`
+	if err := os.WriteFile(fake, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	repo := config.Repository{Backend: "local", URL: filepath.Join(dir, "repo"), Password: "x",
+		Env: map[string]string{"MARKER": marker, "STARTED": started}}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() {
+		_, err := (&ResticRunner{Path: fake}).Backup(ctx, repo, []string{dir}, []string{"job"})
+		done <- err
+	}()
+
+	for deadline := time.Now().Add(5 * time.Second); time.Now().Before(deadline); time.Sleep(20 * time.Millisecond) {
+		if _, err := os.Stat(started); err == nil {
+			break
+		}
+	}
+	cancel()
+	select {
+	case <-done:
+	case <-time.After(resticWaitDelay + 5*time.Second):
+		t.Fatal("cancelled backup did not return")
+	}
+
+	got, err := os.ReadFile(marker)
+	if err != nil {
+		t.Fatalf("fake restic recorded no signal (killed outright?): %v", err)
+	}
+	if strings.TrimSpace(string(got)) != "INT" {
+		t.Fatalf("expected restic to receive SIGINT, got %q", got)
+	}
 }

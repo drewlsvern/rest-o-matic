@@ -33,14 +33,14 @@ func TestRunJob_HooksRunOnceRegardlessOfRepositoryCount(t *testing.T) {
 		Source: config.Source{Paths: []string{srcDir}},
 		Hooks: config.Hooks{
 			Before: []string{"echo before >> " + marker},
-			After:  []string{"echo after >> " + marker},
+			After:  config.AfterHooks{Always: []string{"echo after >> " + marker}},
 		},
 		Policy:       "hot",
 		Repositories: []config.RepositoryRef{{Name: "a"}, {Name: "b"}},
 	}
 	cfg := testConfig(t, "documents", job, map[string]config.Repository{"a": repoA, "b": repoB})
 
-	result := RunJob(context.Background(), cfg, "documents", Options{
+	result := RunJob(context.Background(), context.Background(), cfg, "documents", Options{
 		Restic:  NewResticRunner(),
 		LockDir: t.TempDir(),
 	})
@@ -72,14 +72,14 @@ func TestRunJob_BeforeHookFailureAbortsBackupButRunsAfterHooks(t *testing.T) {
 		Source: config.Source{Paths: []string{srcDir}},
 		Hooks: config.Hooks{
 			Before: []string{"exit 1"},
-			After:  []string{"touch " + afterMarker},
+			After:  config.AfterHooks{Always: []string{"touch " + afterMarker}},
 		},
 		Policy:       "hot",
 		Repositories: []config.RepositoryRef{{Name: "nas"}},
 	}
 	cfg := testConfig(t, "postgres", job, map[string]config.Repository{"nas": repo})
 
-	result := RunJob(context.Background(), cfg, "postgres", Options{
+	result := RunJob(context.Background(), context.Background(), cfg, "postgres", Options{
 		Restic:  NewResticRunner(),
 		LockDir: t.TempDir(),
 	})
@@ -118,7 +118,7 @@ func TestRunJob_IndependentPerRepositoryBackup(t *testing.T) {
 	}
 	cfg := testConfig(t, "documents", job, map[string]config.Repository{"bad": badRepo, "good": goodRepo})
 
-	result := RunJob(context.Background(), cfg, "documents", Options{
+	result := RunJob(context.Background(), context.Background(), cfg, "documents", Options{
 		Restic:  NewResticRunner(),
 		LockDir: t.TempDir(),
 	})

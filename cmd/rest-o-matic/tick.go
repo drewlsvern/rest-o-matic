@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"sort"
 	"sync"
@@ -58,26 +59,32 @@ once they've all finished.`,
 		sort.Strings(due)
 
 		opts := execution.Options{Restic: execution.NewResticRunner(), LockDir: lockDir()}
-		results := dispatch(cfg, store, due, opts)
+		work, cleanup, stop := interruptContexts()
+		defer stop()
+		results := dispatch(work, cleanup, cfg, store, due, opts)
 
-		failed := 0
+		failed, skipped := 0, len(due)-len(results)
 		for _, r := range results {
 			printResult(r)
 			if !r.Success() {
 				failed++
 			}
 		}
-		succeeded := fmt.Sprintf("%d succeeded", len(due)-failed)
-		if len(due)-failed > 0 {
+		succeeded := fmt.Sprintf("%d succeeded", len(results)-failed)
+		if len(results)-failed > 0 {
 			succeeded = color.Stdout.Success(succeeded)
 		}
 		failedMsg := fmt.Sprintf("%d failed", failed)
 		if failed > 0 {
 			failedMsg = color.Stdout.Error(failedMsg)
 		}
-		fmt.Printf("tick: %d job(s) due, %s, %s\n", len(due), succeeded, failedMsg)
-		if failed > 0 {
-			return fmt.Errorf("%d/%d due job(s) failed", failed, len(due))
+		summary := fmt.Sprintf("tick: %d job(s) due, %s, %s", len(due), succeeded, failedMsg)
+		if skipped > 0 {
+			summary += ", " + color.Stdout.Warn(fmt.Sprintf("%d not started", skipped)) + fmt.Sprintf(" (%v)", context.Cause(work))
+		}
+		fmt.Println(summary)
+		if failed > 0 || skipped > 0 {
+			return fmt.Errorf("%d/%d due job(s) failed or not started", failed+skipped, len(due))
 		}
 		return nil
 	},
@@ -89,20 +96,37 @@ once they've all finished.`,
 // cross-process concurrency slot and per-repository locks (see exec.go and
 // internal/lock), so the same cap holds even if another process (a
 // concurrently-running tick, or a manual `run`) is also executing jobs.
-func dispatch(cfg *config.Config, store *state.Store, due []string, opts execution.Options) []execution.JobResult {
+//
+// Once work is cancelled no further job starts; the returned results cover
+// only the jobs that did, in due order.
+func dispatch(work, cleanup context.Context, cfg *config.Config, store *state.Store, due []string, opts execution.Options) []execution.JobResult {
 	sem := make(chan struct{}, cfg.MaxConcurrent)
 	var wg sync.WaitGroup
 	results := make([]execution.JobResult, len(due))
+	report := make([]bool, len(due))
 
 	for i, name := range due {
+		select {
+		case sem <- struct{}{}:
+		case <-work.Done():
+		}
+		if work.Err() != nil {
+			break
+		}
 		wg.Add(1)
-		sem <- struct{}{}
 		go func(i int, name string) {
 			defer wg.Done()
 			defer func() { <-sem }()
-			results[i] = executeWithSlot(cfg, store, name, opts)
+			results[i], report[i] = executeWithSlot(work, cleanup, cfg, store, name, opts)
 		}(i, name)
 	}
 	wg.Wait()
-	return results
+
+	var ran []execution.JobResult
+	for i := range due {
+		if report[i] {
+			ran = append(ran, results[i])
+		}
+	}
+	return ran
 }

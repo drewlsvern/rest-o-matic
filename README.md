@@ -133,6 +133,37 @@ restic would otherwise quietly treat the url as a local directory. `url` itself
 is always passed to restic unchanged. An unrecognised backend or a relative
 local path produces a warning rather than an error.
 
+### Hooks
+
+`before` commands run first; if one fails, the rest are skipped and no
+backup runs. `after` runs once every repository has been attempted, and can
+be a plain list (run every time) or a map that splits by outcome:
+
+```yaml
+hooks:
+  before: ["update-container.sh stop app"]
+  after:
+    always:  ["update-container.sh start app"]         # every time, first
+    success: ["curl -fsS https://hc-ping.com/<uuid>"]   # then, if all ok
+    failure: ["notify.sh \"$RESTOMATIC_JOB: $RESTOMATIC_ERROR\""]  # or, if not
+```
+
+- The order is always `before` → backups → `always` → `success` *or*
+  `failure`, whatever order you write the keys in. `after: [...]` as a plain
+  list means `always`.
+- A failing `always` command fails the job, so a container that didn't come
+  back up triggers `failure`. A failing `success`/`failure` command is
+  reported but doesn't change the outcome.
+- Every command in `always`, `success` and `failure` runs even if an earlier
+  one fails.
+- Hooks get `RESTOMATIC_JOB`; `success`/`failure` also get
+  `RESTOMATIC_OUTCOME`, `RESTOMATIC_FAILED_REPOS` and `RESTOMATIC_ERROR`.
+- If rest-o-matic is stopped (SIGTERM or Ctrl-C), it stops the running backup,
+  starts no further jobs, then runs `always` and `failure` for up to 60
+  seconds before exiting; the job is recorded as failed. A second signal skips
+  that cleanup. Under systemd, set `TimeoutStopSec=` above 60 (e.g. `120`) so
+  the cleanup isn't cut short by SIGKILL.
+
 Validate a config without running anything:
 
 ```sh

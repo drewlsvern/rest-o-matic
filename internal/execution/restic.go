@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/exec"
 	"strconv"
+	"time"
 
 	"github.com/drewlsvern/rest-o-matic/internal/config"
 )
@@ -30,6 +31,24 @@ func (r *ResticRunner) binary() string {
 		return r.Path
 	}
 	return "restic"
+}
+
+// resticWaitDelay is how long a cancelled restic gets to exit after SIGINT
+// before it is killed outright.
+const resticWaitDelay = 10 * time.Second
+
+// configureResticCancel makes cancelling ctx send restic SIGINT instead of
+// exec's default SIGKILL: on SIGINT restic removes its lock from the
+// repository, whereas a killed restic leaves a stale lock behind. Where
+// SIGINT can't be sent (Windows), it falls back to killing the process.
+func configureResticCancel(cmd *exec.Cmd) {
+	cmd.Cancel = func() error {
+		if err := cmd.Process.Signal(os.Interrupt); err != nil {
+			return cmd.Process.Kill()
+		}
+		return nil
+	}
+	cmd.WaitDelay = resticWaitDelay
 }
 
 // repoEnv builds the environment restic needs to reach a repository:
@@ -92,6 +111,7 @@ func (r *ResticRunner) Backup(ctx context.Context, repo config.Repository, paths
 
 	cmd := exec.CommandContext(ctx, r.binary(), args...)
 	cmd.Env = repoEnv(repo)
+	configureResticCancel(cmd)
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
@@ -138,6 +158,7 @@ func (r *ResticRunner) Forget(ctx context.Context, repo config.Repository, jobTa
 
 	cmd := exec.CommandContext(ctx, r.binary(), args...)
 	cmd.Env = repoEnv(repo)
+	configureResticCancel(cmd)
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
 
