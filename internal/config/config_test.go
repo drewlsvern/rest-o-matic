@@ -70,7 +70,7 @@ backups:
 	if err != nil {
 		t.Fatalf("Load: %v", err)
 	}
-	errs := Validate(cfg)
+	errs := Validate(cfg).Errors
 	if !containsJobError(errs, "documents", "source.paths must be non-empty") {
 		t.Fatalf("expected empty-paths validation error, got: %v", errs)
 	}
@@ -155,7 +155,7 @@ backups:
 	if err != nil {
 		t.Fatalf("Load: %v", err)
 	}
-	errs := Validate(cfg)
+	errs := Validate(cfg).Errors
 	if !containsJobError(errs, "documents", `references undefined policy "missing"`) {
 		t.Fatalf("expected undefined-policy validation error, got: %v", errs)
 	}
@@ -177,7 +177,7 @@ backups:
 	if err != nil {
 		t.Fatalf("Load: %v", err)
 	}
-	errs := Validate(cfg)
+	errs := Validate(cfg).Errors
 	if !containsJobError(errs, "documents", `references undefined repository "missing"`) {
 		t.Fatalf("expected undefined-repository validation error, got: %v", errs)
 	}
@@ -195,9 +195,63 @@ backups:
 	if err != nil {
 		t.Fatalf("Load: %v", err)
 	}
-	errs := Validate(cfg)
+	errs := Validate(cfg).Errors
 	if len(errs) < 3 {
 		t.Fatalf("expected at least 3 validation errors (policy, repo, paths), got %d: %v", len(errs), errs)
+	}
+}
+
+func TestValidate_ReportsRepositoryAndJobErrorsTogether(t *testing.T) {
+	path := writeTempConfig(t, `
+repositories:
+  offsite: {backend: s3, url: "host.example.com/bucket"}
+backups:
+  documents:
+    source: {paths: ["/a"]}
+    policy: missing
+    repositories: [offsite]
+`)
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	errs := Validate(cfg).Errors
+	if !containsJobError(errs, "documents", `references undefined policy "missing"`) {
+		t.Fatalf("expected undefined-policy validation error, got: %v", errs)
+	}
+	found := false
+	for _, e := range errs {
+		if ve, ok := e.(ValidationError); ok && ve.Repository == "offsite" && contains(ve.Message, `"s3:"`) {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("expected missing-prefix error for repository offsite, got: %v", errs)
+	}
+}
+
+func TestValidate_WarningsDoNotFailValidation(t *testing.T) {
+	path := writeTempConfig(t, `
+policies:
+  hot: {schedule: hourly, retention: {hourly: 24}}
+repositories:
+  nas: {backend: local, url: backups/restic}
+backups:
+  documents:
+    source: {paths: ["/a"]}
+    policy: hot
+    repositories: [nas]
+`)
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	res := Validate(cfg)
+	if len(res.Errors) != 0 {
+		t.Fatalf("expected no errors, got: %v", res.Errors)
+	}
+	if len(res.Warnings) != 1 {
+		t.Fatalf("expected one relative-path warning, got: %v", res.Warnings)
 	}
 }
 

@@ -126,6 +126,13 @@ always scoped to a job's own tag). Retention resolves through up to three
 levels, each overriding only the keys it mentions: the named policy, then an
 optional job-level override, then an optional per-repository override.
 
+Each repository's `backend` is required and must match its `url`'s scheme
+prefix (`backend: s3` needs a url starting with `s3:`, `sftp` needs `sftp:`,
+and so on; `local` needs a plain path). A mismatch is a config error, because
+restic would otherwise quietly treat the url as a local directory. `url` itself
+is always passed to restic unchanged. An unrecognised backend or a relative
+local path produces a warning rather than an error.
+
 Validate a config without running anything:
 
 ```sh
