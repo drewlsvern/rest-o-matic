@@ -128,10 +128,26 @@
 #       before:
 #         - "pg_dump mydb > /var/backups/postgres/mydb.sql"
 #       # Run once per job execution, after every repository has been
-#       # attempted - even if a before-hook or a backup failed, so cleanup
-#       # like this still happens.
+#       # attempted. Always in this order, whatever order the keys are in:
+#       #   always  - every time, first: even if a before-hook or a backup
+#       #             failed, or rest-o-matic was stopped with SIGTERM/Ctrl-C
+#       #             (then limited to 60s). A failing command here fails
+#       #             the job.
+#       #   success - then, only if the job fully succeeded
+#       #   failure - then, only if anything failed (including `always`)
+#       # Every command in each list runs even if an earlier one fails.
+#       # A plain list (`after: [cmd, ...]`) is the same as `always`.
+#       #
+#       # Hooks get RESTOMATIC_JOB; success/failure also get
+#       # RESTOMATIC_OUTCOME (success|failure), RESTOMATIC_FAILED_REPOS
+#       # (comma-separated) and RESTOMATIC_ERROR (first failure, one line).
 #       after:
-#         - "rm -f /var/backups/postgres/mydb.sql"
+#         always:
+#           - "rm -f /var/backups/postgres/mydb.sql"
+#         success:
+#           - "curl -fsS https://hc-ping.com/<uuid>"
+#         failure:
+#           - "curl -fsS https://hc-ping.com/<uuid>/fail"
 #
 #     policy: hot
 #

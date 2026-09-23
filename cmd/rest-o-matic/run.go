@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 
 	"github.com/spf13/cobra"
@@ -27,7 +28,13 @@ var runCmd = &cobra.Command{
 		store := state.NewStore(statePath())
 		opts := execution.Options{Restic: execution.NewResticRunner(), LockDir: lockDir()}
 
-		result := executeWithSlot(cfg, store, jobName, opts)
+		work, cleanup, stop := interruptContexts()
+		defer stop()
+
+		result, started := executeWithSlot(work, cleanup, cfg, store, jobName, opts)
+		if !started {
+			return fmt.Errorf("job %q not started: %v", jobName, context.Cause(work))
+		}
 		printResult(result)
 		if !result.Success() {
 			return fmt.Errorf("job %q failed", jobName)

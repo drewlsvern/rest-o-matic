@@ -85,8 +85,53 @@ func (s *Source) UnmarshalYAML(value *yaml.Node) error {
 
 // Hooks are shell commands run once per job execution.
 type Hooks struct {
-	Before []string `yaml:"before"`
-	After  []string `yaml:"after"`
+	Before []string   `yaml:"before"`
+	After  AfterHooks `yaml:"after"`
+}
+
+// AfterHooks are the commands run once all repositories have been attempted:
+// Always first, then Success or Failure depending on the job's outcome.
+type AfterHooks struct {
+	Always  []string
+	Success []string
+	Failure []string
+}
+
+// UnmarshalYAML accepts either a list of commands (the original form, which
+// means Always) or a mapping of `always`, `success` and `failure` lists.
+// Unknown mapping keys are rejected so a misspelt hook can't silently never
+// run.
+func (a *AfterHooks) UnmarshalYAML(value *yaml.Node) error {
+	switch {
+	case value.Kind == yaml.ScalarNode && value.Tag == "!!null":
+		return nil
+	case value.Kind == yaml.SequenceNode:
+		if err := value.Decode(&a.Always); err != nil {
+			return fmt.Errorf("after: %w", err)
+		}
+		return nil
+	case value.Kind == yaml.MappingNode:
+		for i := 0; i+1 < len(value.Content); i += 2 {
+			key, val := value.Content[i], value.Content[i+1]
+			var dst *[]string
+			switch key.Value {
+			case "always":
+				dst = &a.Always
+			case "success":
+				dst = &a.Success
+			case "failure":
+				dst = &a.Failure
+			default:
+				return fmt.Errorf("line %d: after: unknown key %q (want always, success, or failure)", key.Line, key.Value)
+			}
+			if err := val.Decode(dst); err != nil {
+				return fmt.Errorf("after.%s: %w", key.Value, err)
+			}
+		}
+		return nil
+	default:
+		return fmt.Errorf("line %d: after: must be a list of commands or a map of always/success/failure", value.Line)
+	}
 }
 
 // RepositoryRef is one entry in a job's repositories list. It may be a bare
