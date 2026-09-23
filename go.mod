@@ -5,6 +5,7 @@ go 1.25.0
 require (
 	github.com/gofrs/flock v0.13.1
 	github.com/spf13/cobra v1.10.2
+	golang.org/x/term v0.45.0
 	gopkg.in/yaml.v3 v3.0.1
 )
 

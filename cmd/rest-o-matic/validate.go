@@ -6,6 +6,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/drewlsvern/rest-o-matic/internal/color"
 	"github.com/drewlsvern/rest-o-matic/internal/config"
 )
 
@@ -22,12 +23,12 @@ var validateCmd = &cobra.Command{
 		printConfigWarnings(res.Warnings)
 		errs := res.Errors
 		if len(errs) == 0 {
-			fmt.Println("config is valid")
+			fmt.Println(color.Stdout.Success("config is valid"))
 			return nil
 		}
 
 		for _, e := range errs {
-			fmt.Fprintln(os.Stderr, "config error:", e)
+			fmt.Fprintln(os.Stderr, color.Stderr.Error("config error:"), e)
 		}
 		return fmt.Errorf("%d config validation error(s)", len(errs))
 	},
