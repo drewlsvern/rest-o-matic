@@ -164,6 +164,24 @@ hooks:
   that cleanup. Under systemd, set `TimeoutStopSec=` above 60 (e.g. `120`) so
   the cleanup isn't cut short by SIGKILL.
 
+Each hook is one command line run by the platform's shell: `sh -c` on Linux
+and macOS, `cmd.exe` on Windows. Write hooks in that shell's syntax, e.g.
+environment variables are `$RESTOMATIC_JOB` on Linux/macOS but
+`%RESTOMATIC_JOB%` on Windows. Simple commands work the same on both:
+
+```yaml
+# Windows
+after:
+  success: ["curl -fsS --retry 5 -m 10 https://hc-ping.com/<uuid>"]
+  failure: ['curl -fsS -m 10 -d "%RESTOMATIC_JOB% failed" https://hc-ping.com/<uuid>/fail']
+```
+
+For anything more involved on Windows, call a script from the hook
+(`powershell -NoProfile -File C:\scripts\notify.ps1`). When a Windows hook
+has to be stopped (an interrupt, or the cleanup time limit), it and everything
+it started are killed immediately, rather than asked to exit first as on
+Linux/macOS.
+
 Validate a config without running anything:
 
 ```sh

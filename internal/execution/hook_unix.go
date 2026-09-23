@@ -3,17 +3,19 @@
 package execution
 
 import (
+	"context"
 	"errors"
 	"os/exec"
 	"syscall"
 	"time"
 )
 
-// configureHookProcess starts the hook in its own process group so that
-// cancelling it reaches the whole tree `sh -c` started (e.g. a running
+// newHookCmd runs command through `sh -c`, in its own process group so that
+// cancelling it reaches the whole tree the shell started (e.g. a running
 // rsync), not just the shell: SIGTERM first, then SIGKILL after
 // hookWaitDelay if anything is still alive.
-func configureHookProcess(cmd *exec.Cmd) {
+func newHookCmd(ctx context.Context, command string) *exec.Cmd {
+	cmd := exec.CommandContext(ctx, "sh", "-c", command)
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	cmd.Cancel = func() error {
 		pgid := -cmd.Process.Pid
@@ -24,4 +26,5 @@ func configureHookProcess(cmd *exec.Cmd) {
 		return nil
 	}
 	cmd.WaitDelay = hookWaitDelay
+	return cmd
 }

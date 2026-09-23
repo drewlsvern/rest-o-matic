@@ -31,3 +31,27 @@ jobs:
 
       - name: Test
         run: go test ./...
+
+  windows:
+    # Hooks run through cmd.exe on Windows (see internal/execution/
+    # hook_windows.go); this job exercises that path. Only internal/execution
+    # is tested here - the rest of the suite assumes sh and restic, and its
+    # Unix-only tests are excluded by build tags.
+    runs-on: windows-latest
+    steps:
+      - name: Check out code
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Build
+        run: go build ./...
+
+      - name: Vet
+        run: go vet ./...
+
+      - name: Test hook runner
+        run: go test ./internal/execution/
