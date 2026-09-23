@@ -103,7 +103,7 @@ func dispatch(work, cleanup context.Context, cfg *config.Config, store *state.St
 	sem := make(chan struct{}, cfg.MaxConcurrent)
 	var wg sync.WaitGroup
 	results := make([]execution.JobResult, len(due))
-	started := make([]bool, len(due))
+	report := make([]bool, len(due))
 
 	for i, name := range due {
 		select {
@@ -117,14 +117,14 @@ func dispatch(work, cleanup context.Context, cfg *config.Config, store *state.St
 		go func(i int, name string) {
 			defer wg.Done()
 			defer func() { <-sem }()
-			results[i], started[i] = executeWithSlot(work, cleanup, cfg, store, name, opts)
+			results[i], report[i] = executeWithSlot(work, cleanup, cfg, store, name, opts)
 		}(i, name)
 	}
 	wg.Wait()
 
 	var ran []execution.JobResult
 	for i := range due {
-		if started[i] {
+		if report[i] {
 			ran = append(ran, results[i])
 		}
 	}

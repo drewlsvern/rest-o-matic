@@ -31,8 +31,8 @@ var runCmd = &cobra.Command{
 		work, cleanup, stop := interruptContexts()
 		defer stop()
 
-		result, started := executeWithSlot(work, cleanup, cfg, store, jobName, opts)
-		if !started {
+		result, report := executeWithSlot(work, cleanup, cfg, store, jobName, opts)
+		if !report {
 			return fmt.Errorf("job %q not started: %v", jobName, context.Cause(work))
 		}
 		printResult(result)

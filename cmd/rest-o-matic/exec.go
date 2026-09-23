@@ -14,9 +14,11 @@ import (
 
 // executeWithSlot acquires a global concurrency slot (a cross-process
 // limiter shared by tick and run alike) before running the job, deferring
-// it if none is available. started is false when the job never began
-// because work was already interrupted; such a job has no result to report.
-func executeWithSlot(work, cleanup context.Context, cfg *config.Config, store *state.Store, name string, opts execution.Options) (result execution.JobResult, started bool) {
+// it if none is available. report says whether result should be printed and
+// counted: true when the job ran or failed to get a slot (both are
+// outcomes), false only when work was interrupted before the job began, so
+// there is nothing to report.
+func executeWithSlot(work, cleanup context.Context, cfg *config.Config, store *state.Store, name string, opts execution.Options) (result execution.JobResult, report bool) {
 	slot, ok, err := lock.AcquireSlot(lockDir(), cfg.MaxConcurrent)
 	if err != nil {
 		return execution.JobResult{Job: name, HookErr: fmt.Errorf("acquiring concurrency slot: %w", err)}, true
