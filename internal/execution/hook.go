@@ -5,25 +5,23 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"os/exec"
 	"strings"
 	"time"
 )
 
-// hookWaitDelay is how long a cancelled hook gets to exit after SIGTERM
-// before it is killed outright.
+// hookWaitDelay bounds how long a cancelled hook's process tree may take to
+// exit before it is killed outright and its output pipes are closed.
 const hookWaitDelay = 5 * time.Second
 
-// runHook runs one hook command through `sh -c` with the caller's
-// environment plus env. Cancelling ctx stops the command and, on Unix,
-// everything it started.
+// runHook runs one hook command through the platform's shell (see
+// newHookCmd) with the caller's environment plus env. Cancelling ctx stops
+// the command and everything it started.
 func runHook(ctx context.Context, command string, env []string) error {
-	cmd := exec.CommandContext(ctx, "sh", "-c", command)
+	cmd := newHookCmd(ctx, command)
 	cmd.Env = append(os.Environ(), env...)
 	var out bytes.Buffer
 	cmd.Stdout = &out
 	cmd.Stderr = &out
-	configureHookProcess(cmd)
 	if err := cmd.Run(); err != nil {
 		if output := strings.TrimSpace(out.String()); output != "" {
 			return fmt.Errorf("hook %q failed: %w: %s", command, err, output)

@@ -141,6 +141,9 @@
 #       # Hooks get RESTOMATIC_JOB; success/failure also get
 #       # RESTOMATIC_OUTCOME (success|failure), RESTOMATIC_FAILED_REPOS
 #       # (comma-separated) and RESTOMATIC_ERROR (first failure, one line).
+#       #
+#       # Hooks run through `sh -c` on Linux/macOS and `cmd.exe` on Windows,
+#       # so use that shell's syntax (e.g. %RESTOMATIC_JOB% on Windows).
 #       after:
 #         always:
 #           - "rm -f /var/backups/postgres/mydb.sql"
