@@ -3,6 +3,7 @@
 #
 #   curl -fsSL https://raw.githubusercontent.com/drewlsvern/rest-o-matic/main/install.sh | sh
 #   curl -fsSL .../install.sh | sh -s -- --version v0.0.1-rc.3
+#   curl -fsSL .../install.sh | sudo sh      # system-wide, /usr/local/bin
 #
 # Plain POSIX sh, so it runs on distros without bash (Alpine, busybox).
 # Needs curl or wget, tar, and sha256sum or shasum. Run with --help for
@@ -23,9 +24,8 @@ Usage: install.sh [options]
   -v, --version TAG  install this release (e.g. v0.0.1-rc.3) instead of the
                      newest one, pre-releases included
   -l, --list         list available releases, newest first, and exit
-  -d, --dir DIR      install into DIR (default: /usr/local/bin, or
-                     ~/.local/bin when that isn't writable and sudo isn't
-                     available)
+  -d, --dir DIR      install into DIR (default: /usr/local/bin when run as
+                     root, e.g. with sudo; otherwise ~/.local/bin)
   -h, --help         show this help
 
 The environment variables RESTOMATIC_VERSION and RESTOMATIC_INSTALL_DIR set
@@ -152,26 +152,18 @@ grep " $asset\$" "$tmp/checksums.txt" >"$tmp/sum" || die "$asset is missing from
 (cd "$tmp" && sha256 sum >/dev/null) || die "checksum mismatch for $asset"
 tar -xzf "$tmp/$asset" -C "$tmp" rest-o-matic || die "could not extract $asset"
 
-# Pick the install directory, and whether writing to it needs sudo.
-sudo=""
+# System-wide only when run as root (e.g. with sudo); otherwise just for
+# this user. The script never calls sudo itself.
 if [ -z "$install_dir" ]; then
-	install_dir=/usr/local/bin
-	if [ "$(id -u)" != 0 ] && ! [ -w "$install_dir" ] && ! command -v sudo >/dev/null 2>&1; then
+	if [ "$(id -u)" = 0 ]; then
+		install_dir=/usr/local/bin
+	else
 		install_dir="$HOME/.local/bin"
 	fi
 fi
-if [ "$(id -u)" != 0 ]; then
-	# The nearest existing directory decides whether mkdir -p needs sudo too.
-	probe=$install_dir
-	while ! [ -d "$probe" ]; do probe=$(dirname "$probe"); done
-	if ! [ -w "$probe" ] || { [ -e "$install_dir" ] && ! [ -w "$install_dir" ]; }; then
-		command -v sudo >/dev/null 2>&1 || die "$install_dir is not writable; rerun as root or pass --dir"
-		sudo=sudo
-	fi
-fi
-
-$sudo mkdir -p "$install_dir"
-$sudo install -m 0755 "$tmp/rest-o-matic" "$install_dir/rest-o-matic"
+mkdir -p "$install_dir" 2>/dev/null && [ -w "$install_dir" ] ||
+	die "$install_dir is not writable; rerun with sudo, or pass a different --dir"
+install -m 0755 "$tmp/rest-o-matic" "$install_dir/rest-o-matic"
 say "Installed $("$install_dir/rest-o-matic" --version | head -n 1) to $install_dir/rest-o-matic"
 
 case ":$PATH:" in
