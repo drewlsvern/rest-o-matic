@@ -25,11 +25,12 @@ provenance (real commit hash and build time — see "Version" below).
 
 On Linux or macOS, [`install.sh`](install.sh) does this for you. It
 downloads the newest release for your OS and CPU, verifies its checksum,
-and installs it into `/usr/local/bin` (using sudo if needed, or
-`~/.local/bin` when sudo isn't available):
+and installs it into `~/.local/bin`, or into `/usr/local/bin` when run as
+root:
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/drewlsvern/rest-o-matic/main/install.sh | sh
+curl -fsSL https://raw.githubusercontent.com/drewlsvern/rest-o-matic/main/install.sh | sh        # just you
+curl -fsSL https://raw.githubusercontent.com/drewlsvern/rest-o-matic/main/install.sh | sudo sh   # system-wide
 # a specific release, or a different directory:
 curl -fsSL https://raw.githubusercontent.com/drewlsvern/rest-o-matic/main/install.sh | sh -s -- --version v0.0.1-rc.3 --dir ~/bin
 ```
