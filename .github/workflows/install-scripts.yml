@@ -1,0 +1,110 @@
+name: Install scripts
+
+# Runs install.sh and install.ps1 for real against the published releases,
+# on each OS they support, whenever either script changes.
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - install.sh
+      - install.ps1
+      - .github/workflows/install-scripts.yml
+
+# Runners share IPs, so unauthenticated GitHub API calls hit the rate limit;
+# both scripts send GITHUB_TOKEN when it's set.
+env:
+  GITHUB_TOKEN: ${{ github.token }}
+
+jobs:
+  unix:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: List releases
+        run: sh install.sh --list
+
+      - name: Install the newest release
+        run: |
+          sh install.sh --dir "$RUNNER_TEMP/newest"
+          "$RUNNER_TEMP/newest/rest-o-matic" --version
+
+      - name: Install a pinned release, piped like curl | sh
+        run: |
+          sh -s -- --version 0.0.1-rc.2 --dir "$RUNNER_TEMP/pinned" < install.sh
+          "$RUNNER_TEMP/pinned/rest-o-matic" --version | grep -F v0.0.1-rc.2
+
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: List releases (Windows PowerShell 5.1)
+        shell: powershell
+        run: .\install.ps1 -List
+
+      - name: Install a pinned release into a folder (Windows PowerShell 5.1)
+        shell: powershell
+        run: |
+          .\install.ps1 -Version 0.0.1-rc.2 -InstallDir "$env:RUNNER_TEMP\pinned" -NoPath
+          $v = @(& "$env:RUNNER_TEMP\pinned\rest-o-matic.exe" --version)[0]
+          if ($v -notmatch 'v0\.0\.1-rc\.2') { throw "unexpected version: $v" }
+
+      - name: Install the newest release with defaults, as irm | iex would (PowerShell 7)
+        # Runners are administrators, so this takes the Program Files +
+        # machine PATH route.
+        shell: pwsh
+        run: |
+          Get-Content -Raw .\install.ps1 | Invoke-Expression
+          $exe = Join-Path $env:ProgramFiles 'rest-o-matic\rest-o-matic.exe'
+          if (-not (Test-Path $exe)) { throw "not installed at $exe" }
+          rest-o-matic --version
+          $machinePath = [Environment]::GetEnvironmentVariable('Path', 'Machine')
+          if (($machinePath -split ';') -notcontains (Split-Path $exe)) { throw 'install folder was not added to the machine PATH' }
+
+      - name: Install as a normal (non-admin) user (Windows PowerShell 5.1)
+        # Runners are administrators, so create a standard local user and run
+        # the installer as them. -LoadUserProfile gives that user a
+        # %LOCALAPPDATA% and a loaded HKCU, which the user route writes to.
+        shell: powershell
+        run: |
+          $password = ConvertTo-SecureString "Rom-$([guid]::NewGuid().ToString('N'))-aA1!" -AsPlainText -Force
+          New-LocalUser -Name romtest -Password $password -PasswordNeverExpires | Out-Null
+          $credential = New-Object System.Management.Automation.PSCredential('romtest', $password)
+
+          $work = 'C:\romtest'
+          New-Item -ItemType Directory -Path $work -Force | Out-Null
+          icacls $work /grant 'romtest:(OI)(CI)F' | Out-Null
+          Copy-Item .\install.ps1 $work
+          Set-Content -Path "$work\check.ps1" -Value @'
+          $ErrorActionPreference = 'Stop'
+          $admin = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
+          "running as $env:USERNAME, administrator: $admin"
+          if ($admin) { throw 'expected a non-admin user' }
+          & C:\romtest\install.ps1 -Version 0.0.1-rc.2
+          $dir = Join-Path $env:LOCALAPPDATA 'Programs\rest-o-matic'
+          if (-not (Test-Path "$dir\rest-o-matic.exe")) { throw "not installed in $dir" }
+          $userPath = [string](Get-ItemProperty HKCU:\Environment).Path
+          if (($userPath -split ';') -notcontains $dir) { throw "$dir missing from the user PATH: $userPath" }
+          @(& "$dir\rest-o-matic.exe" --version)[0]
+          'normal-user install OK'
+          '@
+
+          $p = Start-Process powershell.exe -Credential $credential -LoadUserProfile -Wait -PassThru `
+            -WorkingDirectory $work -RedirectStandardOutput "$work\out.txt" -RedirectStandardError "$work\err.txt" `
+            -ArgumentList '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', "$work\check.ps1"
+          Get-Content "$work\out.txt", "$work\err.txt"
+          if ($p.ExitCode -ne 0) { throw "normal-user install failed with exit code $($p.ExitCode)" }
+
+          $machinePath = [Environment]::GetEnvironmentVariable('Path', 'Machine')
+          if ($machinePath -match 'romtest') { throw 'a normal-user install changed the machine PATH' }
+
+      - name: A bad version fails cleanly
+        shell: pwsh
+        run: |
+          try { .\install.ps1 -Version v9.9.9 -InstallDir "$env:RUNNER_TEMP\bad" -NoPath; throw 'expected a failure' }
+          catch { if ("$_" -notmatch 'check the version with -List') { throw } ; "failed as expected: $_" }
