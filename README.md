@@ -23,6 +23,20 @@ toolchain needed on that machine, it's the exact artifact that was built and
 tested, checksums are provided, and `--version` on it reports full build
 provenance (real commit hash and build time — see "Version" below).
 
+On Linux or macOS, [`install.sh`](install.sh) does this for you. It
+downloads the newest release for your OS and CPU, verifies its checksum,
+and installs it into `/usr/local/bin` (using sudo if needed, or
+`~/.local/bin` when sudo isn't available):
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/drewlsvern/rest-o-matic/main/install.sh | sh
+# a specific release, or a different directory:
+curl -fsSL https://raw.githubusercontent.com/drewlsvern/rest-o-matic/main/install.sh | sh -s -- --version v0.0.1-rc.3 --dir ~/bin
+```
+
+`--list` shows the available releases. It's plain POSIX `sh` and needs only
+`curl` or `wget`, `tar`, and `sha256sum` or `shasum`. Or do it by hand:
+
 ```sh
 curl -LO https://github.com/drewlsvern/rest-o-matic/releases/download/<version>/rest-o-matic_<version>_<os>_<arch>.tar.gz
 curl -LO https://github.com/drewlsvern/rest-o-matic/releases/download/<version>/checksums.txt
