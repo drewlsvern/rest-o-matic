@@ -23,6 +23,15 @@ jobs:
         # skipping most of it.
         run: sudo apt-get update && sudo apt-get install -y restic
 
+      - name: Install podman
+        # The read_as: podman-unshare tests (internal/execution/
+        # podman_integration_test.go) skip when `podman unshare` can't run.
+        # Check it here so a runner without rootless podman fails loudly
+        # instead of silently skipping them.
+        run: |
+          command -v podman >/dev/null || sudo apt-get install -y podman
+          podman unshare true
+
       - name: Build
         run: go build ./...
 

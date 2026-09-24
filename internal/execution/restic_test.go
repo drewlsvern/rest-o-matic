@@ -67,7 +67,7 @@ func TestBackup_AutomaticJobTag(t *testing.T) {
 
 	srcDir := t.TempDir()
 
-	if _, err := r.Backup(context.Background(), repo, []string{srcDir}, []string{"postgres"}); err != nil {
+	if _, err := r.Backup(context.Background(), repo, config.ReadDirect, []string{srcDir}, []string{"postgres"}); err != nil {
 		t.Fatalf("Backup: %v", err)
 	}
 
@@ -88,7 +88,7 @@ func TestBackup_AdditiveUserTags(t *testing.T) {
 
 	// Automatic job-name tag plus a user-supplied tag, as RunJob would build it.
 	tags := []string{"postgres", "prod"}
-	if _, err := r.Backup(context.Background(), repo, []string{srcDir}, tags); err != nil {
+	if _, err := r.Backup(context.Background(), repo, config.ReadDirect, []string{srcDir}, tags); err != nil {
 		t.Fatalf("Backup: %v", err)
 	}
 
@@ -108,10 +108,10 @@ func TestForget_TagScopedToOwnJobOnly(t *testing.T) {
 	srcDir := t.TempDir()
 
 	// Two jobs sharing one repository, per the config/proposal example.
-	if _, err := r.Backup(context.Background(), repo, []string{srcDir}, []string{"documents"}); err != nil {
+	if _, err := r.Backup(context.Background(), repo, config.ReadDirect, []string{srcDir}, []string{"documents"}); err != nil {
 		t.Fatalf("Backup(documents): %v", err)
 	}
-	if _, err := r.Backup(context.Background(), repo, []string{srcDir}, []string{"postgres"}); err != nil {
+	if _, err := r.Backup(context.Background(), repo, config.ReadDirect, []string{srcDir}, []string{"postgres"}); err != nil {
 		t.Fatalf("Backup(postgres): %v", err)
 	}
 
@@ -160,7 +160,7 @@ wait
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan error, 1)
 	go func() {
-		_, err := (&ResticRunner{Path: fake}).Backup(ctx, repo, []string{dir}, []string{"job"})
+		_, err := (&ResticRunner{Path: fake}).Backup(ctx, repo, config.ReadDirect, []string{dir}, []string{"job"})
 		done <- err
 	}()
 

@@ -6,19 +6,25 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
+	"runtime"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/drewlsvern/rest-o-matic/internal/config"
 )
 
 // ResticRunner invokes the restic binary. Path defaults to "restic" (looked
-// up on PATH); override it in tests.
+// up on PATH); override it in tests. Podman is the podman binary used by
+// the podman-unshare read mode, "podman" on PATH when empty.
 type ResticRunner struct {
-	Path string
+	Path   string
+	Podman string
 }
 
 // NewResticRunner returns a runner that invokes "restic" from PATH.
@@ -31,6 +37,35 @@ func (r *ResticRunner) binary() string {
 		return r.Path
 	}
 	return "restic"
+}
+
+// command builds the restic invocation for args in the given read mode
+// (see config.Job.ReadAs). In podman-unshare mode restic runs as
+// `podman unshare <restic> <args...>`, with restic resolved to an absolute
+// path first so it doesn't depend on PATH inside the namespace. The
+// environment is set by the caller and passes through podman unchanged.
+func (r *ResticRunner) command(ctx context.Context, mode string, args []string) (*exec.Cmd, error) {
+	switch mode {
+	case "", config.ReadDirect:
+		return exec.CommandContext(ctx, r.binary(), args...), nil
+	case config.ReadPodmanUnshare:
+		restic, err := exec.LookPath(r.binary())
+		if err != nil {
+			return nil, fmt.Errorf("finding restic: %w", err)
+		}
+		if restic, err = filepath.Abs(restic); err != nil {
+			return nil, fmt.Errorf("finding restic: %w", err)
+		}
+		podman := r.Podman
+		if podman == "" {
+			podman = "podman"
+		}
+		if podman, err = exec.LookPath(podman); err != nil {
+			return nil, fmt.Errorf("read_as: %s needs podman, which was not found: %w", mode, err)
+		}
+		return exec.CommandContext(ctx, podman, append([]string{"unshare", restic}, args...)...), nil
+	}
+	return nil, fmt.Errorf("unknown read mode %q", mode)
 }
 
 // resticWaitDelay is how long a cancelled restic gets to exit after SIGINT
@@ -101,7 +136,7 @@ func parseSnapshotID(output []byte) string {
 // including the automatic job-name tag alongside any user tags). restic's
 // own stderr output is preserved on failure per the design's "surface
 // restic's errors, don't reinterpret them" decision.
-func (r *ResticRunner) Backup(ctx context.Context, repo config.Repository, paths []string, tags []string) (snapshotID string, err error) {
+func (r *ResticRunner) Backup(ctx context.Context, repo config.Repository, mode string, paths []string, tags []string) (snapshotID string, err error) {
 	args := []string{"-r", repo.URL, "backup"}
 	args = append(args, paths...)
 	for _, t := range tags {
@@ -109,17 +144,53 @@ func (r *ResticRunner) Backup(ctx context.Context, repo config.Repository, paths
 	}
 	args = append(args, "--json")
 
-	cmd := exec.CommandContext(ctx, r.binary(), args...)
+	cmd, err := r.command(ctx, mode, args)
+	if err != nil {
+		return "", err
+	}
 	cmd.Env = repoEnv(repo)
-	configureResticCancel(cmd)
+	if mode == "" || mode == config.ReadDirect {
+		configureResticCancel(cmd)
+	} else {
+		configureWrappedResticCancel(cmd)
+	}
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
 
 	if runErr := cmd.Run(); runErr != nil {
-		return "", fmt.Errorf("restic backup failed: %w: %s", runErr, stderr.String())
+		err := fmt.Errorf("restic backup failed: %w: %s", runErr, stderr.String())
+		if hint := unreadableHint(runErr, stderr.String(), mode); hint != "" {
+			err = fmt.Errorf("%w\nhint: %s", err, hint)
+		}
+		return "", err
 	}
 	return parseSnapshotID(stdout.Bytes()), nil
+}
+
+// hostGOOS and lookPath are runtime.GOOS and exec.LookPath; variables so
+// tests can pick which hint unreadableHint gives.
+var (
+	hostGOOS = runtime.GOOS
+	lookPath = exec.LookPath
+)
+
+// unreadableHint explains a backup that failed because restic couldn't
+// read some source files (exit code 3 with permission errors), or returns
+// "" for any other failure. Files written by rootless Podman containers
+// are the common cause, so a direct job on a Linux host with podman is
+// pointed at read_as: podman-unshare.
+func unreadableHint(runErr error, stderr, mode string) string {
+	var exitErr *exec.ExitError
+	if !errors.As(runErr, &exitErr) || exitErr.ExitCode() != 3 || !strings.Contains(strings.ToLower(stderr), "permission denied") {
+		return ""
+	}
+	if (mode == "" || mode == config.ReadDirect) && hostGOOS == "linux" {
+		if _, err := lookPath("podman"); err == nil {
+			return "some source files could not be read; if rootless Podman containers wrote them, set read_as: " + config.ReadPodmanUnshare + " on this job"
+		}
+	}
+	return "some source files could not be read; run rest-o-matic as the user that owns them, or as root"
 }
 
 // retentionFlag maps a Retention key to the restic --keep-* flag it
