@@ -2,10 +2,13 @@ package execution
 
 import (
 	"context"
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/drewlsvern/rest-o-matic/internal/config"
 	"github.com/drewlsvern/rest-o-matic/internal/lock"
+	"github.com/drewlsvern/rest-o-matic/internal/statedir"
 )
 
 // --- Lock-type classification (spec: Lock-Type-Based Concurrency Guard) ---
@@ -196,5 +199,71 @@ func TestExec_ForceSkipsTheLockAndInvokesRestic(t *testing.T) {
 	}
 	if result.Blocked != NotBlocked {
 		t.Fatalf("expected force to skip the lock guard and actually invoke restic, got %+v", result)
+	}
+}
+
+// --- State directory ownership (spec: State Directory Owned by the Running User) ---
+
+// fakeStateDirOwner makes the ownership check fail as if the state
+// directory belonged to another user, and reports whether it was called.
+func fakeStateDirOwner(t *testing.T) *bool {
+	t.Helper()
+	called := false
+	orig := checkStateDir
+	t.Cleanup(func() { checkStateDir = orig })
+	checkStateDir = func(dir string) error {
+		called = true
+		return &statedir.OwnerError{Dir: dir, UID: 0, Mismatches: []statedir.Mismatch{{Path: dir, UID: 1000}}}
+	}
+	return &called
+}
+
+func TestExec_LockingSubcommandRefusedWhenStateDirOwnedByAnotherUser(t *testing.T) {
+	called := fakeStateDirOwner(t)
+	stateDir := t.TempDir()
+	lockDir := filepath.Join(stateDir, statedir.LocksDir)
+	// A restic that can't be started would make Exec return an error, so
+	// a clean refusal also proves restic was never invoked.
+	opts := Options{Restic: &ResticRunner{Path: filepath.Join(stateDir, "no-restic")}, LockDir: lockDir, StateDir: stateDir}
+
+	result, err := Exec(context.Background(), execTestConfig(), "nas", []string{"prune"}, false, opts)
+	if err != nil {
+		t.Fatalf("Exec: %v", err)
+	}
+	if !*called || result.Blocked != BlockedByStateDir || result.ExitCode != ExitStateDirBlocked || result.StateDirErr == nil {
+		t.Fatalf("expected a state-dir refusal with exit code %d, got called=%v %+v", ExitStateDirBlocked, *called, result)
+	}
+	if _, err := os.Stat(lockDir); !os.IsNotExist(err) {
+		t.Fatalf("expected no locks directory to be created, stat err=%v", err)
+	}
+}
+
+func TestExec_SharedLockSubcommandAndForceSkipTheStateDirCheck(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		args  []string
+		force bool
+	}{
+		{"shared-lock subcommand", []string{"snapshots"}, false},
+		{"force", []string{"prune"}, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			called := fakeStateDirOwner(t)
+			stateDir := t.TempDir()
+			opts := Options{Restic: &ResticRunner{Path: filepath.Join(stateDir, "no-restic")}, LockDir: filepath.Join(stateDir, statedir.LocksDir), StateDir: stateDir}
+
+			// restic can't start here, so an error is expected; what
+			// matters is that the ownership check never ran.
+			result, _ := Exec(context.Background(), execTestConfig(), "nas", tc.args, tc.force, opts)
+			if *called || result.Blocked == BlockedByStateDir {
+				t.Fatalf("expected the ownership check to be skipped, got called=%v %+v", *called, result)
+			}
+		})
+	}
+}
+
+func TestExitStateDirBlocked_IsDistinctFromOtherReservedCodes(t *testing.T) {
+	if ExitStateDirBlocked == ExitLockBlocked || ExitStateDirBlocked == ExitGateBlocked || ExitStateDirBlocked == 3 {
+		t.Fatalf("expected %d to be distinct from the other reserved codes and restic's exit code 3", ExitStateDirBlocked)
 	}
 }

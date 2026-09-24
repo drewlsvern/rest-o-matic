@@ -237,6 +237,31 @@ processes (two overlapping ticks, or a tick and a manual `run`):
   just a performance one.
 - No more than `max_concurrent` jobs run at once, period.
 
+### One user per state directory
+
+The state file and the lock files live in `.rest-o-matic/` (or
+`--state-dir`), relative to the directory rest-o-matic is started from, so
+give scheduled runs an absolute `--state-dir`. Always run rest-o-matic as
+the same user for a given state directory: the files are created on first
+use, readable only by their owner, and never removed. One `sudo
+rest-o-matic run …` would leave root-owned files behind that every later
+run as your usual user can't open.
+
+`run`, `tick` and any `exec` that takes rest-o-matic's own lock check this
+first, and refuse to start if the directory or a file in it belongs to
+another user. The error lists every path that doesn't match:
+
+- If the **directory itself** belongs to someone else, run rest-o-matic as
+  that user, or pass a separate `--state-dir`.
+- If only **files inside it** do (left by an earlier run as another user),
+  delete them or `chown` them to your user. They hold no backup data, only
+  last-run times and locks.
+
+`exec` subcommands that don't take the lock (`snapshots`, `restore` and the
+other read-oriented ones, or anything with `--force`) create no files there,
+so they aren't checked. `validate` isn't checked either. The check doesn't
+apply on Windows.
+
 ## Running raw restic commands
 
 For anything `backup`/`forget` don't cover — `snapshots`, `check`, `restore`,
@@ -271,10 +296,12 @@ Two safeguards apply, and they're independent of each other:
   only ways around it are adding `--tag <job-name>` yourself, or running
   `restic` directly outside of `exec`.
 
-When `exec` refuses to invoke restic at all, it uses one of two reserved
+When `exec` refuses to invoke restic at all, it uses one of three reserved
 exit codes instead of restic's own: `20` means it was blocked by the lock
 (retry later, or use `--force`), `21` means it was blocked by the
-tag-safety gate (the command itself needs `--tag`, not a retry). Whenever
+tag-safety gate (the command itself needs `--tag`, not a retry), and `22`
+means the state directory belongs to another user (see
+[One user per state directory](#one-user-per-state-directory)). Whenever
 restic is actually invoked, its own exit code is returned unchanged instead.
 
 Currently, a lock-blocked message just says the repository is "in use by

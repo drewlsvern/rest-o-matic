@@ -14,6 +14,10 @@ import (
 type Options struct {
 	Restic  *ResticRunner
 	LockDir string
+	// StateDir, when set, is checked for ownership by exec before it
+	// takes a repository lock. run and tick check it themselves, once,
+	// before anything starts.
+	StateDir string
 }
 
 // RepoOutcome is the result of attempting one job's backup+forget against
