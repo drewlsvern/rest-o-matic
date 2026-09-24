@@ -61,6 +61,43 @@ jobs:
           $machinePath = [Environment]::GetEnvironmentVariable('Path', 'Machine')
           if (($machinePath -split ';') -notcontains (Split-Path $exe)) { throw 'install folder was not added to the machine PATH' }
 
+      - name: Install as a normal (non-admin) user (Windows PowerShell 5.1)
+        # Runners are administrators, so create a standard local user and run
+        # the installer as them. -LoadUserProfile gives that user a
+        # %LOCALAPPDATA% and a loaded HKCU, which the user route writes to.
+        shell: powershell
+        run: |
+          $password = ConvertTo-SecureString "Rom-$([guid]::NewGuid().ToString('N'))-aA1!" -AsPlainText -Force
+          New-LocalUser -Name romtest -Password $password -PasswordNeverExpires | Out-Null
+          $credential = New-Object System.Management.Automation.PSCredential('romtest', $password)
+
+          $work = 'C:\romtest'
+          New-Item -ItemType Directory -Path $work -Force | Out-Null
+          icacls $work /grant 'romtest:(OI)(CI)F' | Out-Null
+          Copy-Item .\install.ps1 $work
+          Set-Content -Path "$work\check.ps1" -Value @'
+          $ErrorActionPreference = 'Stop'
+          $admin = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
+          "running as $env:USERNAME, administrator: $admin"
+          if ($admin) { throw 'expected a non-admin user' }
+          & C:\romtest\install.ps1 -Version 0.0.1-rc.2
+          $dir = Join-Path $env:LOCALAPPDATA 'Programs\rest-o-matic'
+          if (-not (Test-Path "$dir\rest-o-matic.exe")) { throw "not installed in $dir" }
+          $userPath = [string](Get-ItemProperty HKCU:\Environment).Path
+          if (($userPath -split ';') -notcontains $dir) { throw "$dir missing from the user PATH: $userPath" }
+          & "$dir\rest-o-matic.exe" --version | Select-Object -First 1
+          'normal-user install OK'
+          '@
+
+          $p = Start-Process powershell.exe -Credential $credential -LoadUserProfile -Wait -PassThru `
+            -WorkingDirectory $work -RedirectStandardOutput "$work\out.txt" -RedirectStandardError "$work\err.txt" `
+            -ArgumentList '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', "$work\check.ps1"
+          Get-Content "$work\out.txt", "$work\err.txt"
+          if ($p.ExitCode -ne 0) { throw "normal-user install failed with exit code $($p.ExitCode)" }
+
+          $machinePath = [Environment]::GetEnvironmentVariable('Path', 'Machine')
+          if ($machinePath -match 'romtest') { throw 'a normal-user install changed the machine PATH' }
+
       - name: A bad version fails cleanly
         shell: pwsh
         run: |
