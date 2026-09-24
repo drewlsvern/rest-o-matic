@@ -46,7 +46,7 @@ jobs:
         shell: powershell
         run: |
           .\install.ps1 -Version 0.0.1-rc.2 -InstallDir "$env:RUNNER_TEMP\pinned" -NoPath
-          $v = & "$env:RUNNER_TEMP\pinned\rest-o-matic.exe" --version | Select-Object -First 1
+          $v = @(& "$env:RUNNER_TEMP\pinned\rest-o-matic.exe" --version)[0]
           if ($v -notmatch 'v0\.0\.1-rc\.2') { throw "unexpected version: $v" }
 
       - name: Install the newest release with defaults, as irm | iex would (PowerShell 7)
@@ -85,7 +85,7 @@ jobs:
           if (-not (Test-Path "$dir\rest-o-matic.exe")) { throw "not installed in $dir" }
           $userPath = [string](Get-ItemProperty HKCU:\Environment).Path
           if (($userPath -split ';') -notcontains $dir) { throw "$dir missing from the user PATH: $userPath" }
-          & "$dir\rest-o-matic.exe" --version | Select-Object -First 1
+          @(& "$dir\rest-o-matic.exe" --version)[0]
           'normal-user install OK'
           '@
 

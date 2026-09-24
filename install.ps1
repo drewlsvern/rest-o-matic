@@ -147,8 +147,11 @@ param(
         Remove-Item -Recurse -Force $tmp -ErrorAction SilentlyContinue
     }
 
-    $installed = & $target --version | Select-Object -First 1
-    Write-Output "Installed $installed to $target"
+    # Collect all the output before taking the first line: cutting the
+    # pipeline short (Select-Object -First 1) can make the exe exit 1.
+    $versionOutput = @(& $target --version)
+    if ($LASTEXITCODE -ne 0) { throw "installed $target, but running it failed with exit code $LASTEXITCODE" }
+    Write-Output "Installed $($versionOutput[0]) to $target"
 
     if (-not $NoPath) {
         $scope = if ($isAdmin) { 'Machine' } else { 'User' }
