@@ -48,6 +48,20 @@ tar -xzf rest-o-matic_<version>_<os>_<arch>.tar.gz
 `darwin_arm64`, or `windows_amd64` — see the Releases page for the current
 `<version>` and exact filenames; Windows archives are `.zip` instead.)
 
+On Windows, [`install.ps1`](install.ps1) does the same from PowerShell
+(Windows PowerShell 5.1 or PowerShell 7):
+
+```powershell
+irm https://raw.githubusercontent.com/drewlsvern/rest-o-matic/main/install.ps1 | iex
+# a specific release, or a different folder:
+& ([scriptblock]::Create((irm https://raw.githubusercontent.com/drewlsvern/rest-o-matic/main/install.ps1))) -Version v0.0.1-rc.3 -InstallDir C:\Tools\rest-o-matic
+```
+
+It installs just for you into `%LOCALAPPDATA%\Programs\rest-o-matic`, or
+for everyone into `Program Files\rest-o-matic` when run from an elevated
+(administrator) PowerShell, and adds that folder to your user or the machine
+`PATH` (`-NoPath` skips this). `-List` shows the available releases.
+
 **For quickly trying a version on a machine that already has Go installed**:
 
 ```sh

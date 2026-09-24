@@ -1,0 +1,68 @@
+name: Install scripts
+
+# Runs install.sh and install.ps1 for real against the published releases,
+# on each OS they support, whenever either script changes.
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - install.sh
+      - install.ps1
+      - .github/workflows/install-scripts.yml
+
+jobs:
+  unix:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: List releases
+        run: sh install.sh --list
+
+      - name: Install the newest release
+        run: |
+          sh install.sh --dir "$RUNNER_TEMP/newest"
+          "$RUNNER_TEMP/newest/rest-o-matic" --version
+
+      - name: Install a pinned release, piped like curl | sh
+        run: |
+          sh -s -- --version 0.0.1-rc.2 --dir "$RUNNER_TEMP/pinned" < install.sh
+          "$RUNNER_TEMP/pinned/rest-o-matic" --version | grep -F v0.0.1-rc.2
+
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: List releases (Windows PowerShell 5.1)
+        shell: powershell
+        run: .\install.ps1 -List
+
+      - name: Install a pinned release into a folder (Windows PowerShell 5.1)
+        shell: powershell
+        run: |
+          .\install.ps1 -Version 0.0.1-rc.2 -InstallDir "$env:RUNNER_TEMP\pinned" -NoPath
+          $v = & "$env:RUNNER_TEMP\pinned\rest-o-matic.exe" --version | Select-Object -First 1
+          if ($v -notmatch 'v0\.0\.1-rc\.2') { throw "unexpected version: $v" }
+
+      - name: Install the newest release with defaults, as irm | iex would (PowerShell 7)
+        # Runners are administrators, so this takes the Program Files +
+        # machine PATH route.
+        shell: pwsh
+        run: |
+          Get-Content -Raw .\install.ps1 | Invoke-Expression
+          $exe = Join-Path $env:ProgramFiles 'rest-o-matic\rest-o-matic.exe'
+          if (-not (Test-Path $exe)) { throw "not installed at $exe" }
+          rest-o-matic --version
+          $machinePath = [Environment]::GetEnvironmentVariable('Path', 'Machine')
+          if (($machinePath -split ';') -notcontains (Split-Path $exe)) { throw 'install folder was not added to the machine PATH' }
+
+      - name: A bad version fails cleanly
+        shell: pwsh
+        run: |
+          try { .\install.ps1 -Version v9.9.9 -InstallDir "$env:RUNNER_TEMP\bad" -NoPath; throw 'expected a failure' }
+          catch { if ("$_" -notmatch 'check the version with -List') { throw } ; "failed as expected: $_" }
