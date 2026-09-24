@@ -28,6 +28,10 @@ List available releases, newest first, and stop.
 .PARAMETER NoPath
 Don't add the install folder to PATH.
 
+.NOTES
+When $env:GITHUB_TOKEN is set, it is sent with GitHub API requests (listing
+releases), which raises GitHub's rate limit.
+
 .EXAMPLE
 irm https://raw.githubusercontent.com/drewlsvern/rest-o-matic/main/install.ps1 | iex
 
@@ -57,9 +61,12 @@ param(
 
     function Get-Releases {
         try {
-            @(Invoke-RestMethod -UseBasicParsing -Uri "$api/releases?per_page=100")
+            # Without a token GitHub allows only 60 API requests an hour per IP.
+            $headers = @{}
+            if ($env:GITHUB_TOKEN) { $headers['Authorization'] = "Bearer $env:GITHUB_TOKEN" }
+            @(Invoke-RestMethod -UseBasicParsing -Headers $headers -Uri "$api/releases?per_page=100")
         } catch {
-            throw "could not list releases from GitHub (try -Version): $($_.Exception.Message)"
+            throw "could not list releases from GitHub (try -Version, or set GITHUB_TOKEN if it's a rate limit): $($_.Exception.Message)"
         }
     }
 
