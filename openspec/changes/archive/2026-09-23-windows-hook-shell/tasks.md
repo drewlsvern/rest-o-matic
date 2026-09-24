@@ -15,11 +15,11 @@
 ## 3. CI
 
 - [x] 3.1 Add a `windows` job to `.github/workflows/ci.yml` on `windows-latest`: checkout, setup-go from `go.mod`, `go build ./...`, `go vet ./...`, `go test ./internal/execution/`
-- [ ] 3.2 Confirm on the pull request that both the Linux and Windows jobs run and pass
+- [x] 3.2 Confirm on the pull request that both the Linux and Windows jobs run and pass
 
 ## 4. Docs and Verification
 
 - [x] 4.1 README "Hooks" section and `rest-o-matic.example.yaml`: hooks run through `sh -c` on Linux/macOS and `cmd.exe` on Windows; use that shell's syntax (`%VAR%` vs `$VAR`); a Windows example (the `curl` ping); on Windows interrupted hooks are killed immediately
 - [x] 4.2 `go test ./...` and `go vet ./...` pass on Linux; `GOOS=darwin go build ./...` succeeds
 - [x] 4.3 `openspec validate windows-hook-shell --strict` passes
-- [ ] 4.4 After merge (manual, repository owner): add the Windows check to `main`'s required status checks if it should gate merges
+- [x] 4.4 After merge (manual, repository owner): add the Windows check to `main`'s required status checks if it should gate merges
