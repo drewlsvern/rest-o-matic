@@ -29,7 +29,9 @@ Usage: install.sh [options]
   -h, --help         show this help
 
 The environment variables RESTOMATIC_VERSION and RESTOMATIC_INSTALL_DIR set
-the same defaults as --version and --dir.
+the same defaults as --version and --dir. GITHUB_TOKEN, when set, is sent
+with GitHub API requests (listing releases), which raises GitHub's rate
+limit.
 EOF
 }
 
@@ -76,13 +78,29 @@ while [ $# -gt 0 ]; do
 done
 
 # fetch URL [FILE]: download URL to FILE, or to stdout without one.
+# api URL: fetch a GitHub API URL to stdout, sending $GITHUB_TOKEN when set
+# (without one, GitHub allows only 60 API requests an hour per IP).
 if command -v curl >/dev/null 2>&1; then
 	fetch() {
 		if [ $# -ge 2 ]; then curl -fsSL -o "$2" "$1"; else curl -fsSL "$1"; fi
 	}
+	api() {
+		if [ -n "${GITHUB_TOKEN:-}" ]; then
+			curl -fsSL -H "Authorization: Bearer $GITHUB_TOKEN" "$1"
+		else
+			curl -fsSL "$1"
+		fi
+	}
 elif command -v wget >/dev/null 2>&1; then
 	fetch() {
 		if [ $# -ge 2 ]; then wget -q -O "$2" "$1"; else wget -q -O - "$1"; fi
+	}
+	api() {
+		if [ -n "${GITHUB_TOKEN:-}" ]; then
+			wget -q --header "Authorization: Bearer $GITHUB_TOKEN" -O - "$1"
+		else
+			wget -q -O - "$1"
+		fi
 	}
 else
 	die "curl or wget is required"
@@ -91,9 +109,11 @@ fi
 # releases: print "TAG release" or "TAG pre-release" per published
 # release, newest first. The GitHub API's JSON is split on commas and read
 # with awk, so jq isn't needed; each release's tag_name comes before its
-# prerelease field.
+# prerelease field. The JSON is fetched first so a failed request (such as
+# a rate limit) is reported as one, not as "no releases".
 releases() {
-	fetch "$API/releases?per_page=100" | tr ',' '\n' | awk '
+	json=$(api "$API/releases?per_page=100") || return 1
+	printf '%s\n' "$json" | tr ',' '\n' | awk '
 		/"tag_name":/ { sub(/.*"tag_name": *"/, ""); sub(/".*/, ""); tag = $0 }
 		/"prerelease":/ && tag != "" {
 			print tag, (/true/ ? "pre-release" : "release")
@@ -102,14 +122,14 @@ releases() {
 }
 
 if [ "$list" = 1 ]; then
-	all=$(releases) || die "could not list releases from GitHub"
+	all=$(releases) || die "could not list releases from GitHub (if it's a rate limit, set GITHUB_TOKEN)"
 	[ -n "$all" ] || die "no releases found"
 	say "$all"
 	exit 0
 fi
 
 if [ "$version" = latest ]; then
-	all=$(releases) || die "could not list releases from GitHub (try --version TAG)"
+	all=$(releases) || die "could not list releases from GitHub (try --version TAG, or set GITHUB_TOKEN if it's a rate limit)"
 	version=$(say "$all" | awk 'NR == 1 { print $1 }')
 	[ -n "$version" ] || die "no releases found"
 fi
