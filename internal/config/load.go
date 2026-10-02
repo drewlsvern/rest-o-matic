@@ -3,6 +3,7 @@ package config
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 
@@ -42,6 +43,13 @@ func Load(path string) (*Config, error) {
 
 	for name, job := range cfg.Backups {
 		job.Name = name
+		for i, p := range job.Source.Paths {
+			expanded, err := expandHome(p)
+			if err != nil {
+				return nil, fmt.Errorf("config %s: job %q: source path %q: %w", path, name, p, err)
+			}
+			job.Source.Paths[i] = expanded
+		}
 		cfg.Backups[name] = job
 	}
 
@@ -50,6 +58,25 @@ func Load(path string) (*Config, error) {
 	}
 
 	return &cfg, nil
+}
+
+// userHomeDir is os.UserHomeDir; a variable so tests can make it fail.
+var userHomeDir = os.UserHomeDir
+
+// expandHome replaces a leading `~` in a source path with the home
+// directory of the user rest-o-matic is running as. Paths reach restic with
+// no shell in between, so nothing else would expand it. Only `~` alone or
+// `~` followed by a separator counts: `~alice/x` and a `~` further along
+// are left as written.
+func expandHome(p string) (string, error) {
+	if p != "~" && !strings.HasPrefix(p, "~/") && !strings.HasPrefix(p, "~"+string(filepath.Separator)) {
+		return p, nil
+	}
+	home, err := userHomeDir()
+	if err != nil {
+		return "", fmt.Errorf("cannot expand ~: %w", err)
+	}
+	return filepath.Join(home, p[1:]), nil
 }
 
 // configSections are the top-level keys the config is read from. Anything

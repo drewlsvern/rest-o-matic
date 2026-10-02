@@ -63,7 +63,8 @@ backups:
     repositories: [nas]
 ```
 
-Use absolute paths; `~` is not expanded.
+A leading `~` in a source path means your home directory. Nothing else is
+expanded, so write the rest of each path in full.
 
 **2. Check it.**
 
