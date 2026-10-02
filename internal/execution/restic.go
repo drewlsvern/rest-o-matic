@@ -182,7 +182,7 @@ var (
 // pointed at read_as: podman-unshare.
 func unreadableHint(runErr error, stderr, mode string) string {
 	var exitErr *exec.ExitError
-	if !errors.As(runErr, &exitErr) || exitErr.ExitCode() != 3 || !strings.Contains(strings.ToLower(stderr), "permission denied") {
+	if !errors.As(runErr, &exitErr) || exitErr.ExitCode() != 3 || !permissionDenied(stderr) {
 		return ""
 	}
 	if (mode == "" || mode == config.ReadDirect) && hostGOOS == "linux" {
@@ -191,6 +191,14 @@ func unreadableHint(runErr error, stderr, mode string) string {
 		}
 	}
 	return "some source files could not be read; run rest-o-matic as the user that owns them, or as root"
+}
+
+// permissionDenied reports whether restic's stderr shows it was refused
+// access to a source file. Current restic spells the error out; restic up
+// to 0.16 (still what Ubuntu 24.04 packages) reports it under --json only
+// as the errno, `"Err":13` (EACCES on Linux and macOS).
+func permissionDenied(stderr string) bool {
+	return strings.Contains(strings.ToLower(stderr), "permission denied") || strings.Contains(stderr, `"Err":13`)
 }
 
 // retentionFlag maps a Retention key to the restic --keep-* flag it

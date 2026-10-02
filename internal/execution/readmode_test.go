@@ -182,6 +182,9 @@ func exitError(t *testing.T, code int) error {
 
 func TestUnreadableHint(t *testing.T) {
 	const denied = "error: open /src/db: permission denied\n"
+	// What restic 0.16 prints under --json: the errno, with no message.
+	const deniedOldJSON = `{"message_type":"error","error":{"Op":"open","Path":"/src/db","Err":13},"during":"archival","item":"/src/db"}` + "\n"
+	const goneOldJSON = `{"message_type":"error","error":{"Op":"lstat","Path":"/src/gone","Err":2},"during":"archival","item":"/src/gone"}` + "\n"
 	for _, tc := range []struct {
 		name       string
 		code       int
@@ -192,6 +195,8 @@ func TestUnreadableHint(t *testing.T) {
 		want       string // substring; "" means no hint
 	}{
 		{"direct on a podman host", 3, denied, config.ReadDirect, "linux", true, "read_as: podman-unshare"},
+		{"direct on a podman host, restic 0.16 output", 3, deniedOldJSON, config.ReadDirect, "linux", true, "read_as: podman-unshare"},
+		{"exit 3 without permission errors, restic 0.16 output", 3, goneOldJSON, config.ReadDirect, "linux", true, ""},
 		{"direct without podman", 3, denied, config.ReadDirect, "linux", false, "run rest-o-matic as the user that owns them"},
 		{"direct on macOS", 3, denied, config.ReadDirect, "darwin", true, "run rest-o-matic as the user that owns them"},
 		{"already podman-unshare", 3, denied, config.ReadPodmanUnshare, "linux", true, "run rest-o-matic as the user that owns them"},
