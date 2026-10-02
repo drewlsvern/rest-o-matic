@@ -10,7 +10,7 @@ JOB        SCHEDULE  LAST RUN        OUTCOME  TOOK   NEXT DUE
 documents  daily     6 hours ago     ok       1m12s  in 18 hours
 gitea      daily     2 hours ago     FAILED   48s    in 22 hours
   nas: ok (snapshot a1b2c3d4)
-  offsite: backup failed: restic backup failed: exit status 3: ...
+  offsite: backup failed: restic backup failed: exit status 12: wrong password or no key found
 media      weekly    never           -        -      due now
 postgres   hourly    1 hour ago      ok       8s     due since 19:00
   running since 3 minutes ago (started by tick)

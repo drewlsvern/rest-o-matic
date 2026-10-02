@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -250,4 +251,45 @@ func indexOf(s, substr string) int {
 		}
 	}
 	return -1
+}
+
+// A source path written with ~ is backed up from the home directory of the
+// user running rest-o-matic. restic gets no shell to expand it.
+func TestCLI_BackupOfTildePath(t *testing.T) {
+	requireRestic(t)
+	bin := buildBinary(t)
+	workdir, configPath := setupWorkspace(t)
+	home := filepath.Join(workdir, "home")
+	if err := os.MkdirAll(filepath.Join(home, "documents"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(home, "documents", "a.txt"), []byte("hello"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	config, err := os.ReadFile(configPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	withTilde := strings.Replace(string(config), `paths: ["`+filepath.Join(workdir, "src")+`"]`, `paths: ["~/documents"]`, 1)
+	if withTilde == string(config) {
+		t.Fatal("setup: could not rewrite the source path")
+	}
+	if err := os.WriteFile(configPath, []byte(withTilde), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	cmd := exec.Command(bin, "--config", configPath, "run", "documents")
+	cmd.Dir = workdir
+	cmd.Env = append(os.Environ(), "HOME="+home, "USERPROFILE="+home)
+	out, err := cmd.CombinedOutput()
+	if err != nil || !contains(string(out), "job documents: OK") {
+		t.Fatalf("run with a ~ source path failed: %v: %s", err, out)
+	}
+
+	lsCmd := exec.Command("restic", "-r", filepath.Join(workdir, "repo-nas"), "ls", "latest")
+	lsCmd.Env = append(os.Environ(), "RESTIC_PASSWORD=testpass")
+	ls, err := lsCmd.CombinedOutput()
+	if err != nil || !contains(string(ls), filepath.Join(home, "documents", "a.txt")) {
+		t.Fatalf("expected the snapshot to hold the file under the home directory: %v: %s", err, ls)
+	}
 }

@@ -220,7 +220,7 @@ func (r *ResticRunner) SnapshotTags(ctx context.Context, repo config.Repository,
 	cmd.Stderr = &stderr
 	out, err := cmd.Output()
 	if err != nil {
-		return nil, fmt.Errorf("%w: %s", err, strings.TrimSpace(stderr.String()))
+		return nil, resticFailure("restic snapshots failed", err, stderr.String())
 	}
 	var snaps []struct {
 		Tags []string `json:"tags"`
