@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/drewlsvern/rest-o-matic/internal/config"
+	"github.com/drewlsvern/rest-o-matic/internal/state"
 )
 
 // Options bundles what RunJob needs beyond the config and job name.
@@ -55,8 +56,13 @@ type RepoOutcome struct {
 	Repository string
 	// SnapshotID is the snapshot the backup created; empty if it failed.
 	SnapshotID string
-	BackupErr  error
-	ForgetErr  error
+	// Snapshots are the job's snapshots in the repository once retention
+	// has been enforced, newest first. They are only meaningful when
+	// SnapshotsListed is set.
+	Snapshots       []state.Snapshot
+	SnapshotsListed bool
+	BackupErr       error
+	ForgetErr       error
 }
 
 // FailureSummary is a one-line description of what failed against this
@@ -325,8 +331,11 @@ func runRepo(ctx context.Context, cfg *config.Config, jobName, repoName string, 
 		outcome.ForgetErr = err
 		return outcome
 	}
-	if err := opts.Restic.Forget(ctx, repo, jobName, retention); err != nil {
+	kept, listed, err := opts.Restic.Forget(ctx, repo, jobName, retention)
+	if err != nil {
 		outcome.ForgetErr = err
+		return outcome
 	}
+	outcome.Snapshots, outcome.SnapshotsListed = kept, listed
 	return outcome
 }

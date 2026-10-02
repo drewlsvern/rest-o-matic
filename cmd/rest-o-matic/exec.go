@@ -131,8 +131,18 @@ func executeAndRecord(work, cleanup context.Context, cfg *config.Config, store *
 
 	result := execution.RunJob(work, cleanup, cfg, name, opts)
 
+	finished := time.Now()
 	failing := state.Failing{Since: result.FailingSince, Notified: result.FailureNotified}
-	warnStateNotSaved(name, store.RecordRun(name, runRecord(result, started, time.Now(), trigger), failing))
+	warnStateNotSaved(name, store.RecordRun(name, runRecord(result, started, finished, trigger), failing))
+
+	// A repository that failed, or that restic gave no list for, keeps the
+	// list and time it had. The job lock is still held, which is what
+	// SaveSnapshots relies on.
+	for _, ro := range result.Repos {
+		if ro.SnapshotsListed {
+			warnStateNotSaved(name, store.SaveSnapshots(name, ro.Repository, state.SnapshotList{ListedAt: finished, Snapshots: ro.Snapshots}))
+		}
+	}
 	return result
 }
 

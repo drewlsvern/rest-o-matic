@@ -52,6 +52,10 @@ func statusConfig() *config.Config {
 
 func notHeld(string) (bool, error) { return false, nil }
 
+func noSnapshots(string) (map[string]state.SnapshotList, error) {
+	return map[string]state.SnapshotList{}, nil
+}
+
 func heldJobs(names ...string) func(string) (bool, error) {
 	return func(job string) (bool, error) {
 		for _, n := range names {
@@ -79,7 +83,7 @@ func mustStatus(t *testing.T, st *state.State, now time.Time, only string, held 
 	if st.Jobs == nil {
 		st.Jobs = map[string]state.JobState{}
 	}
-	r, err := buildStatus(statusConfig(), st, now, only, held)
+	r, err := buildStatus(statusConfig(), st, now, only, held, noSnapshots)
 	if err != nil {
 		t.Fatalf("buildStatus: %v", err)
 	}
@@ -314,7 +318,7 @@ func TestStatus_RunningWaitingAndStaleMarker(t *testing.T) {
 
 func TestStatus_LockProbeErrorIsReported(t *testing.T) {
 	probe := func(string) (bool, error) { return false, errors.New("permission denied") }
-	if _, err := buildStatus(statusConfig(), &state.State{Jobs: map[string]state.JobState{}}, time.Now(), "", probe); err == nil {
+	if _, err := buildStatus(statusConfig(), &state.State{Jobs: map[string]state.JobState{}}, time.Now(), "", probe, noSnapshots); err == nil {
 		t.Fatal("expected an error when a job's lock can't be checked")
 	}
 }
@@ -610,5 +614,116 @@ func TestStatus_FailingSince(t *testing.T) {
 	}
 	if strings.Count(out, "failing since") != 1 {
 		t.Errorf("only the job failing for more than one run should get the line, got:\n%s", out)
+	}
+}
+
+func TestStatus_SnapshotLists(t *testing.T) {
+	now := ts(t, "2026-10-02T04:01:17Z")
+	size, files := int64(1288490188), int64(4212)
+	filesNew, filesChanged, added, packed := int64(12), int64(3), int64(60000000), int64(47185920)
+	lists := func(job string) (map[string]state.SnapshotList, error) {
+		if job != "gitea" {
+			return map[string]state.SnapshotList{}, nil
+		}
+		return map[string]state.SnapshotList{"nas": {
+			ListedAt: ts(t, "2026-10-01T21:01:17-05:00"),
+			Snapshots: []state.Snapshot{
+				{ID: "49bcad91e0f1aaaa", ShortID: "49bcad91", Time: ts(t, "2026-10-01T21:00:05-05:00"), Hostname: "prd-podman-01", Paths: []string{"/home/me/gitea"}, Tags: []string{"gitea"}, Size: &size, Files: &files,
+					FilesNew: &filesNew, FilesChanged: &filesChanged, DataAdded: &added, DataAddedPacked: &packed},
+				// Taken by a restic that reports no sizes.
+				{ID: "0a3ca2ce77aabbbb", ShortID: "0a3ca2ce", Time: ts(t, "2026-09-30T21:00:05-05:00"), Hostname: "prd-podman-01"},
+			},
+		}}, nil
+	}
+	build := func(only string) statusReport {
+		r, err := buildStatus(statusConfig(), &state.State{Jobs: map[string]state.JobState{}}, now, only, notHeld, lists)
+		if err != nil {
+			t.Fatalf("buildStatus: %v", err)
+		}
+		return r
+	}
+
+	// Every job gets an entry per repository, in config order, with nulls
+	// for a repository that has no list, and no snapshots.
+	all := build("")
+	gitea := jobNamed(t, all, "gitea").SnapshotLists
+	if len(gitea) != 2 || gitea[0].Repository != "nas" || gitea[1].Repository != "offsite" {
+		t.Fatalf("got entries %+v, want nas then offsite", gitea)
+	}
+	if nas := gitea[0]; nas.Count != 2 || nas.ListedAt == nil || !nas.ListedAt.Equal(ts(t, "2026-10-02T02:01:17Z")) || nas.Newest == nil || !nas.Newest.Equal(ts(t, "2026-10-02T02:00:05Z")) || nas.Snapshots != nil {
+		t.Errorf("got nas summary %+v, want count 2 with its list time and newest snapshot time, and no snapshots", nas)
+	}
+	if offsite := gitea[1]; offsite.ListedAt != nil || offsite.Newest != nil || offsite.Count != 0 {
+		t.Errorf("got offsite %+v, want nulls for a repository with no list", offsite)
+	}
+	data, err := json.Marshal(all)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{
+		`{"repository":"nas","listed_at":"2026-10-02T02:01:17Z","count":2,"newest":"2026-10-02T02:00:05Z"}`,
+		`{"repository":"offsite","listed_at":null,"count":0,"newest":null}`,
+	} {
+		if !strings.Contains(string(data), want) {
+			t.Errorf("expected the all-jobs JSON to contain %s, got: %s", want, data)
+		}
+	}
+	if strings.Contains(string(data), `"short_id"`) {
+		t.Errorf("the all-jobs JSON carries snapshots: %s", data)
+	}
+
+	// One job carries the snapshots, newest first, sizes null when unknown.
+	one := build("gitea")
+	data, err = json.Marshal(one)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{
+		`"snapshots":[{"id":"49bcad91e0f1aaaa","short_id":"49bcad91","time":"2026-10-02T02:00:05Z","hostname":"prd-podman-01","paths":["/home/me/gitea"],"tags":["gitea"],"size":1288490188,"files":4212,"files_new":12,"files_changed":3,"data_added":60000000,"data_added_packed":47185920}`,
+		`{"id":"0a3ca2ce77aabbbb","short_id":"0a3ca2ce","time":"2026-10-01T02:00:05Z","hostname":"prd-podman-01","paths":[],"tags":[],"size":null,"files":null,"files_new":null,"files_changed":null,"data_added":null,"data_added_packed":null}`,
+		`{"repository":"offsite","listed_at":null,"count":0,"newest":null,"snapshots":[]}`,
+	} {
+		if !strings.Contains(string(data), want) {
+			t.Errorf("expected the single-job JSON to contain %s, got: %s", want, data)
+		}
+	}
+
+	var b bytes.Buffer
+	writeJobHistory(&b, one, color.NewPainter(false), time.UTC)
+	out := b.String()
+	for _, want := range []string{
+		"no recorded runs",
+		"Snapshots in nas, as of 2 hours ago: 2\nID        TIME              SIZE     CHANGED\n49bcad91  2026-10-02 02:00  1.2 GiB  12 new, 3 changed, +45.0 MiB\n0a3ca2ce  2026-10-01 02:00  -        -\n",
+		"Snapshots in offsite: not listed yet (a list is taken each time the job runs)",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("expected the job view to contain %q, got:\n%s", want, out)
+		}
+	}
+}
+
+func TestHumanBytes(t *testing.T) {
+	for n, want := range map[int64]string{0: "0 B", 8: "8 B", 1023: "1023 B", 1024: "1.0 KiB", 1536: "1.5 KiB", 1288490188: "1.2 GiB", 5 << 40: "5.0 TiB"} {
+		if got := humanBytes(n); got != want {
+			t.Errorf("humanBytes(%d) = %q, want %q", n, got, want)
+		}
+	}
+}
+
+func TestChanged(t *testing.T) {
+	n := func(v int64) *int64 { return &v }
+	for _, tc := range []struct {
+		name string
+		s    snapshotStatus
+		want string
+	}{
+		{"unknown", snapshotStatus{}, "-"},
+		{"packed size preferred", snapshotStatus{FilesNew: n(12), FilesChanged: n(3), DataAdded: n(60000000), DataAddedPacked: n(47185920)}, "12 new, 3 changed, +45.0 MiB"},
+		{"unpacked size when that is all there is", snapshotStatus{FilesNew: n(0), FilesChanged: n(1), DataAdded: n(3142)}, "0 new, 1 changed, +3.1 KiB"},
+		{"nothing changed", snapshotStatus{FilesNew: n(0), FilesChanged: n(0), DataAdded: n(0), DataAddedPacked: n(0)}, "0 new, 0 changed, +0 B"},
+	} {
+		if got := changed(tc.s); got != tc.want {
+			t.Errorf("%s: got %q, want %q", tc.name, got, tc.want)
+		}
 	}
 }

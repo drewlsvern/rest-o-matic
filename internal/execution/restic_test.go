@@ -126,7 +126,7 @@ func TestForget_TagScopedToOwnJobOnly(t *testing.T) {
 	}
 
 	// Enforce postgres's retention; documents' snapshot must be untouched.
-	if err := r.Forget(context.Background(), repo, "postgres", config.Retention{"hourly": 24}); err != nil {
+	if _, _, err := r.Forget(context.Background(), repo, "postgres", config.Retention{"hourly": 24}); err != nil {
 		t.Fatalf("Forget(postgres): %v", err)
 	}
 

@@ -29,9 +29,47 @@ postgres   hourly    1 hour ago      ok       8s     due since 19:00
 `rest-o-matic status <job>` lists that job's recent runs, newest first. The
 last 20 are kept.
 
+## Snapshots
+
+`status <job>` also lists the snapshots that job has in each of its
+repositories:
+
+```
+Snapshots in nas, as of 2 hours ago: 3
+ID        TIME              SIZE     CHANGED
+49bcad91  2026-10-02 02:00  1.2 GiB  12 new, 3 changed, +45.0 MiB
+0a3ca2ce  2026-10-01 02:00  1.2 GiB  0 new, 1 changed, +3.1 KiB
+e974615e  2026-09-30 02:00  1.1 GiB  4212 new, 0 changed, +1.0 GiB
+
+Snapshots in offsite: not listed yet (a list is taken each time the job runs)
+```
+
+The list is a record, not a live view. It is taken each time the job
+finishes a run against that repository, from what restic reports as it
+enforces retention, so it costs no extra call to the repository and is
+shown without contacting it. The "as of" time says how old it is.
+
+- A run that fails for a repository leaves that repository's list as it
+  was.
+- Snapshots added or removed outside rest-o-matic show up the next time the
+  job runs. For the repository's own answer right now, use
+  `rest-o-matic exec <repository> -- snapshots --tag <job>`.
+- CHANGED is what that snapshot changed compared with the one before it:
+  files that were new, files that had changed, and how much it added to
+  the repository. It is a quick way to check that a backup picked up a
+  change, without listing the snapshot's contents.
+- SIZE and CHANGED are shown as `-` with restic older than 0.17, which
+  doesn't report them.
+
+## JSON
+
 `rest-o-matic status --json` prints the same information as a single JSON
 document, with full snapshot IDs and untruncated errors, for scripts and
 monitoring. Times are UTC, and values that don't apply are `null`.
+
+Every job carries a `snapshot_lists` entry for each of its repositories,
+with when the list was taken, how many snapshots it holds and the newest
+one's time. `status <job> --json` adds the snapshots themselves.
 
 `status` exits 0 whenever it could report, whatever the health of the jobs,
 and only reads: it is safe to run as any user that can read the state
