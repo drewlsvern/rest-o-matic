@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"slices"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -24,10 +25,13 @@ const execMessagePrefix = "rest-o-matic: "
 func execErrorPrefix() string { return color.Stderr.Error("rest-o-matic:") + " " }
 func execWarnPrefix() string  { return color.Stderr.Warn("rest-o-matic:") + " " }
 
-var execForce bool
+var (
+	execForce bool
+	execJob   string
+)
 
 var execCmd = &cobra.Command{
-	Use:   "exec <repository> -- <restic subcommand and args>",
+	Use:   "exec <repository> [--job <job>] -- <restic subcommand and args>",
 	Short: "Run a restic subcommand directly against a configured repository",
 	Long: `exec injects a configured repository's connection info and passes
 everything after "--" straight to the real restic binary. Output and the
@@ -40,7 +44,23 @@ own per-repository guard, same as backup/forget use - --force skips this
 specific wait only. Second, "forget", "tag", and "restore latest" are
 refused outright, with no override, when the target repository is used by
 more than one job and no --tag was given - add --tag yourself, or run
-restic directly if you really want to bypass this.`,
+restic directly if you really want to bypass this.
+
+Before taking rest-o-matic's own lock, exec also refuses if the state
+directory or a file in it belongs to another user, since the lock file it
+would create could lock that user's scheduled runs out.
+
+With --job, restic runs in that job's read mode (its read_as setting), so
+files from a read_as: podman-unshare job are listed and restored with the
+owners they had when backed up. For such a job, a restore is refused unless
+its snapshot was taken the same way (it carries restomatic-read=<mode>);
+for "latest", every --tag filter must include that tag. --job adds no tag
+filter itself and does not satisfy the tag-safety check.
+
+When exec refuses without running restic, it exits with a code of its own:
+20 (repository in use), 21 (tag-safety check), 22 (state directory owned
+by another user) or 23 (restore in a different read mode from its
+snapshot). Otherwise the exit code is restic's.`,
 	Args: cobra.MinimumNArgs(2),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		dashAt := cmd.ArgsLenAtDash()
@@ -72,8 +92,22 @@ restic directly if you really want to bypass this.`,
 			os.Exit(1)
 		}
 
-		opts := execution.Options{Restic: execution.NewResticRunner(), LockDir: lockDir()}
-		result, err := execution.Exec(context.Background(), cfg, repoName, resticArgs, execForce, opts)
+		mode := config.ReadDirect
+		if execJob != "" {
+			job, ok := cfg.Backups[execJob]
+			if !ok {
+				fmt.Fprintf(os.Stderr, "%sjob %q is not defined in the config\n", execErrorPrefix(), execJob)
+				os.Exit(1)
+			}
+			if !slices.Contains(cfg.JobsReferencing(repoName), execJob) {
+				fmt.Fprintf(os.Stderr, "%sjob %q does not back up to repository %q\n", execErrorPrefix(), execJob, repoName)
+				os.Exit(1)
+			}
+			mode = job.ReadMode()
+		}
+
+		opts := execution.Options{Restic: execution.NewResticRunner(), LockDir: lockDir(), StateDir: stateDir}
+		result, err := execution.Exec(context.Background(), cfg, repoName, mode, resticArgs, execForce, opts)
 		if err != nil {
 			return err
 		}
@@ -84,6 +118,12 @@ restic directly if you really want to bypass this.`,
 		case execution.BlockedByGate:
 			fmt.Fprintf(os.Stderr, "%srefusing to run %q against %q without --tag: shared by jobs: %s\n%sthis check cannot be bypassed with an option - add --tag <job-name>, or run restic directly outside of exec\n",
 				execErrorPrefix(), resticArgs[0], repoName, strings.Join(result.SharingJobs, ", "), execErrorPrefix())
+		case execution.BlockedByReadMode:
+			fmt.Fprintf(os.Stderr, "%s%s\n", execErrorPrefix(), result.ReadModeMsg)
+		case execution.BlockedByStateDir:
+			for _, line := range strings.Split(result.StateDirErr.Error(), "\n") {
+				fmt.Fprintf(os.Stderr, "%s%s\n", execErrorPrefix(), line)
+			}
 		}
 
 		os.Exit(result.ExitCode)
@@ -92,5 +132,6 @@ restic directly if you really want to bypass this.`,
 }
 
 func init() {
+	execCmd.Flags().StringVar(&execJob, "job", "", "run restic the way this job reads its files (its read_as), e.g. to restore a podman-unshare job's files with their original owners; the job must back up to the repository")
 	execCmd.Flags().BoolVar(&execForce, "force", false, "skip rest-o-matic's own per-repository lock wait (restic's own locking still applies; does not affect the tag-safety check)")
 }

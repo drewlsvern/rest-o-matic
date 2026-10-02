@@ -9,9 +9,10 @@ concepts that most restic wrappers blur together:
   reusable across jobs.
 - **Hooks** — commands to run before/after a job.
 
-This is the initial release: the core wrapper only. Container integrations
-(Podman Quadlets, Docker Compose) and any systemd-based tooling are planned
-for later and are **not** part of this release — see "What's not here yet"
+Container data can be backed up through its bind mounts, including files
+owned by rootless Podman's subordinate uids (see "Container volumes").
+Deeper container integrations (Podman Quadlets, Docker Compose) and any
+systemd-based tooling are planned for later — see "What's not here yet"
 below.
 
 ## Installation
@@ -217,6 +218,113 @@ Validate a config without running anything:
 rest-o-matic validate
 ```
 
+## Container volumes
+
+rest-o-matic has no container-specific source type yet. To back up the data
+of a container, run rest-o-matic **on the container host** and list the
+host side of its bind mounts under `paths:`, with absolute paths. For
+example, a container started with
+`-v /home/me/containers/gitea/data:/data` is backed up with
+`paths: [/home/me/containers/gitea]`. Stop and start containers with hooks
+(see [Hooks](#hooks)) if their data must not change during the backup.
+Named volumes aren't supported yet.
+
+What decides whether this works is **who owns the files** the containers
+write:
+
+| Runtime | Run rest-o-matic as | `read_as` |
+|---|---|---|
+| Rootless Podman | the user that runs the containers | `podman-unshare` (see below) |
+| Rootful Docker or rootful Podman | root | leave unset |
+| Rootless Docker | — | not supported yet |
+
+### Rootless Podman: `read_as: podman-unshare`
+
+Rootless Podman maps users inside a container to your subordinate uids
+(`/etc/subuid`), so a container's `postgres` user (uid 999) writes files
+owned by something like uid 100998 on the host. When those files are
+private (`0600`, or a `0700` directory, as Postgres uses), you can't read
+them as yourself, and the backup fails with restic's exit code 3 and
+`permission denied`. rest-o-matic adds a hint pointing here when that
+happens.
+
+`--userns=keep-id` maps the container's user to *you*, so a container
+running as one user under keep-id writes files you can read. But a
+container whose entrypoint runs as root before switching users, an image
+running as a different uid, or a pod whose containers run as different
+users still produces files you can't read. Rather than working out which
+case applies, set:
+
+```yaml
+backups:
+  gitea:
+    source:
+      paths: [/home/me/containers/gitea]
+    read_as: podman-unshare
+    policy: daily
+    repositories: [nas]
+```
+
+restic then runs as `podman unshare restic backup …`, inside your rootless
+user namespace, where every file your containers wrote is readable. This
+needs no extra privilege, and works the same with or without keep-id. Only
+the backup runs this way; hooks and retention don't. Snapshots taken this
+way are tagged `restomatic-read=podman-unshare`. `read_as` is Linux-only:
+on macOS and Windows, Podman runs containers in a VM and bind-mounted files
+are already readable.
+
+**Restore through the job**, so files come back with the owners they had.
+Restore into an empty scratch directory first, then move what you need into
+place:
+
+```sh
+# 1. restore into a scratch directory
+rest-o-matic exec nas --job gitea -- restore <snapshot-id> \
+  --target /home/me/restore --include /home/me/containers/gitea/data/app.ini
+
+# 2. move it into place (inside the namespace, where the files are yours)
+podman unshare mv /home/me/restore/home/me/containers/gitea/data/app.ini \
+                  /home/me/containers/gitea/data/app.ini
+podman unshare rm -rf /home/me/restore
+```
+
+Don't restore straight to `--target /`. restic also restores the owner and
+permissions of every parent directory on the path (`/home`, `/home/me`,
+…), which under `podman unshare` can't be set for `/` and `/home` (so the
+restore reports errors), and goes wrong for your own directories if the
+snapshot was read differently.
+
+`--job` runs restic the way that job reads its files. A snapshot records
+ownership as it was seen at backup time, so it must be restored the same
+way. For a `podman-unshare` job, `exec --job` refuses (exit code 23) to
+restore a snapshot that lacks the `restomatic-read=podman-unshare` tag,
+and for `latest` it requires that tag in every `--tag` filter
+(`--tag gitea,restomatic-read=podman-unshare`). Restore snapshots taken
+before the job switched to `podman-unshare` with plain `exec`, without
+`--job`. `restic mount` may not work under `--job`; use `restore`, `dump`
+or `ls` instead.
+
+### Rootful Docker or Podman: run as root
+
+The containers already run as root, so run rest-o-matic as root too (from
+root's crontab or a system timer). Root can read every file, and restores
+bring back the original owners. Keep one user per state directory (see
+[One user per state directory](#one-user-per-state-directory)).
+
+If you'd rather not run the whole thing as root, you can let a normal user's
+restic read every file instead. This is an advanced option:
+
+```sh
+sudo groupadd restic && sudo usermod -aG restic me
+sudo chown root:restic /usr/local/bin/restic && sudo chmod 750 /usr/local/bin/restic
+sudo setcap cap_dac_read_search+ep /usr/local/bin/restic
+```
+
+This lets members of the `restic` group read any file on the host through
+restic, and nothing more. The capability is lost whenever the restic binary
+is replaced, so reapply it after upgrades. Restoring files with their
+original owners still needs root (`sudo rest-o-matic exec …`).
+
 ## Scheduling
 
 rest-o-matic never runs as a daemon and never touches your system's
@@ -270,6 +378,31 @@ refuses with an error instead.
 `exec` doesn't wait: if a repository is in use it refuses at once (see
 below).
 
+### One user per state directory
+
+The state file and the lock files live in `.rest-o-matic/` (or
+`--state-dir`), relative to the directory rest-o-matic is started from, so
+give scheduled runs an absolute `--state-dir`. Always run rest-o-matic as
+the same user for a given state directory: the files are created on first
+use, readable only by their owner, and never removed. One `sudo
+rest-o-matic run …` would leave root-owned files behind that every later
+run as your usual user can't open.
+
+`run`, `tick` and any `exec` that takes rest-o-matic's own lock check this
+first, and refuse to start if the directory or a file in it belongs to
+another user. The error lists every path that doesn't match:
+
+- If the **directory itself** belongs to someone else, run rest-o-matic as
+  that user, or pass a separate `--state-dir`.
+- If only **files inside it** do (left by an earlier run as another user),
+  delete them or `chown` them to your user. They hold no backup data, only
+  last-run times and locks.
+
+`exec` subcommands that don't take the lock (`snapshots`, `restore` and the
+other read-oriented ones, or anything with `--force`) create no files there,
+so they aren't checked. `validate` isn't checked either. The check doesn't
+apply on Windows.
+
 ## Running raw restic commands
 
 For anything `backup`/`forget` don't cover — `snapshots`, `check`, `restore`,
@@ -304,10 +437,14 @@ Two safeguards apply, and they're independent of each other:
   only ways around it are adding `--tag <job-name>` yourself, or running
   `restic` directly outside of `exec`.
 
-When `exec` refuses to invoke restic at all, it uses one of two reserved
+When `exec` refuses to invoke restic at all, it uses one of four reserved
 exit codes instead of restic's own: `20` means it was blocked by the lock
 (retry later, or use `--force`), `21` means it was blocked by the
-tag-safety gate (the command itself needs `--tag`, not a retry). Whenever
+tag-safety gate (the command itself needs `--tag`, not a retry), and `22`
+means the state directory belongs to another user (see
+[One user per state directory](#one-user-per-state-directory)), and `23`
+means a restore through `--job` would use a snapshot taken in a different
+read mode (see [Container volumes](#container-volumes)). Whenever
 restic is actually invoked, its own exit code is returned unchanged instead.
 
 Currently, a lock-blocked message just says the repository is "in use by
@@ -351,7 +488,10 @@ mark a hyphenated pre-release tag as a pre-release automatically.
 ## What's not here yet
 
 - Container/Podman/Docker source types (`container`, `quadlet`, `command`
-  sources) — v1 only supports `paths` sources.
+  sources) — v1 only supports `paths` sources. Container data is backed up
+  through its bind mounts; see [Container volumes](#container-volumes).
+- Built-in stopping and starting of containers (use hooks), named volumes,
+  and rootless Docker.
 - Any systemd unit generation — that's reserved for the future Podman
   Quadlet integration specifically.
 - rest-o-matic managing your crontab for you — you own that entry.

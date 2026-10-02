@@ -13,6 +13,10 @@ import (
 type Options struct {
 	Restic  *ResticRunner
 	LockDir string
+	// StateDir, when set, is checked for ownership by exec before it
+	// takes a repository lock. run and tick check it themselves, once,
+	// before anything starts.
+	StateDir string
 }
 
 // RepoOutcome is the result of attempting one job's backup+forget against
@@ -95,6 +99,12 @@ func RunJob(work, cleanup context.Context, cfg *config.Config, jobName string, o
 		result.HookErr = err
 	} else {
 		tags := append([]string{jobName}, job.Tags...)
+		// Records how the files were read, so a restore can use the same
+		// mode; direct snapshots stay untagged, like every snapshot taken
+		// before read modes existed.
+		if mode := job.ReadMode(); mode != config.ReadDirect {
+			tags = append(tags, readModeTag(mode))
+		}
 		for _, ref := range job.Repositories {
 			if work.Err() != nil {
 				break
@@ -184,7 +194,7 @@ func runRepo(ctx context.Context, cfg *config.Config, jobName, repoName string, 
 	repo := cfg.Repositories[repoName]
 	job := cfg.Backups[jobName]
 
-	if _, err := opts.Restic.Backup(ctx, repo, job.Source.Paths, tags); err != nil {
+	if _, err := opts.Restic.Backup(ctx, repo, job.ReadMode(), job.Source.Paths, tags); err != nil {
 		outcome.BackupErr = err
 		return outcome
 	}

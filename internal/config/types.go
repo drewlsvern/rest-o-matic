@@ -191,4 +191,26 @@ type Job struct {
 	// Tags are additive: they never replace the automatic job-name tag
 	// applied to every snapshot.
 	Tags []string `yaml:"tags"`
+
+	// ReadAs is how restic reads the job's source files; empty means
+	// ReadDirect. Use ReadMode to get the effective value.
+	ReadAs string `yaml:"read_as,omitempty"`
+}
+
+// Read modes for a job's `read_as`.
+const (
+	// ReadDirect runs restic as the user rest-o-matic runs as.
+	ReadDirect = "direct"
+	// ReadPodmanUnshare runs restic inside the user's rootless Podman user
+	// namespace (`podman unshare`), where files owned by the user's
+	// subordinate uids - written by rootless containers - are readable.
+	ReadPodmanUnshare = "podman-unshare"
+)
+
+// ReadMode returns the job's effective read mode.
+func (j Job) ReadMode() string {
+	if j.ReadAs == "" {
+		return ReadDirect
+	}
+	return j.ReadAs
 }
