@@ -12,7 +12,10 @@ import (
 	"testing"
 	"time"
 
+	"filippo.io/age"
+
 	"github.com/drewlsvern/rest-o-matic/internal/config"
+	"github.com/drewlsvern/rest-o-matic/internal/secrets"
 )
 
 // requirePodmanUnshare skips unless podman can enter the user's rootless
@@ -89,6 +92,70 @@ func TestPodmanUnshare_BackupAndRestoreSubuidOwnedFile(t *testing.T) {
 	}
 	if info.Mode().Perm() != 0o600 {
 		t.Errorf("restored mode = %v, want 0600", info.Mode().Perm())
+	}
+}
+
+// A locked password and the podman-unshare read mode together. The password
+// is unlocked by rest-o-matic, outside the namespace, and has to reach
+// restic through podman like any other part of its environment.
+func TestPodmanUnshare_BackupWithLockedPassword(t *testing.T) {
+	requireRestic(t)
+	requirePodmanUnshare(t)
+	plain := initRepo(t)
+	src := t.TempDir()
+	secret := subuidOwnedSecret(t, src)
+
+	keyPath := filepath.Join(t.TempDir(), "host.key")
+	if _, err := secrets.Generate(keyPath); err != nil {
+		t.Fatal(err)
+	}
+	key, err := secrets.LoadHostKey(keyPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	lockedPassword, err := secrets.Lock(plain.Password.Value, []age.Recipient{key.Recipient()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	repo := plain
+	repo.Password = config.Secret{Value: lockedPassword, Locked: true}
+
+	r := NewResticRunner()
+	r.Secrets = secrets.NewUnlocker(keyPath, nil)
+
+	// The backup reads a file only the namespace can read, from a
+	// repository whose password is only available locked.
+	id, err := r.Backup(context.Background(), repo, config.ReadPodmanUnshare, []string{src}, []string{"gitea"})
+	if err != nil || id == "" {
+		t.Fatalf("expected the wrapped backup to succeed with a snapshot id, got %q, %v", id, err)
+	}
+
+	// The tag lookup that `exec --job` relies on unlocks the password too.
+	tags, err := r.SnapshotTags(context.Background(), repo, id)
+	if err != nil || !containsTag(tags, "gitea") {
+		t.Fatalf("snapshot tags = %v, %v; want them read with the unlocked password", tags, err)
+	}
+
+	// So does a restore through the same mode, which gives the file back
+	// its host owner.
+	target := t.TempDir()
+	code, err := r.PassThrough(context.Background(), repo, config.ReadPodmanUnshare, []string{"restore", id, "--target", target})
+	if err != nil || code != 0 {
+		t.Fatalf("wrapped restore: code %d, %v", code, err)
+	}
+	if got, want := uidOf(t, filepath.Join(target, secret)), uidOf(t, secret); got != want {
+		t.Errorf("restored owner uid = %d, want %d", got, want)
+	}
+
+	// Without the host key nothing is started, in the namespace or out.
+	keyless := NewResticRunner()
+	keyless.Secrets = secrets.NewUnlocker(filepath.Join(t.TempDir(), "missing.key"), nil)
+	_, err = keyless.Backup(context.Background(), repo, config.ReadPodmanUnshare, []string{src}, []string{"gitea"})
+	if err == nil || !strings.Contains(err.Error(), "password is locked") {
+		t.Fatalf("backup without the host key: got %v, want it refused because the password is locked", err)
+	}
+	if snaps := listSnapshots(t, plain); len(snaps) != 1 {
+		t.Fatalf("got %d snapshots, want only the one taken with the key", len(snaps))
 	}
 }
 
