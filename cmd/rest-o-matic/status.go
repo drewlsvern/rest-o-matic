@@ -49,12 +49,13 @@ of the jobs; use --json to act on the details from a script.`,
 			}
 		}
 
-		st, err := state.NewStore(statePath(), lockDir()).Load()
+		store := state.NewStore(statePath(), lockDir())
+		st, err := store.Load()
 		if err != nil {
 			return err
 		}
 		held := func(job string) (bool, error) { return lock.JobHeld(lockDir(), job) }
-		report, err := buildStatus(cfg, st, time.Now(), only, held)
+		report, err := buildStatus(cfg, st, time.Now(), only, held, store.LoadSnapshots)
 		if err != nil {
 			return err
 		}
@@ -111,6 +112,41 @@ type jobStatus struct {
 	// Runs is the job's history, newest first; present only when a single
 	// job was asked for.
 	Runs []runStatus `json:"runs,omitzero"`
+	// SnapshotLists has one entry for each repository the job backs up
+	// to, in config order.
+	SnapshotLists []snapshotListStatus `json:"snapshot_lists"`
+}
+
+// snapshotListStatus is what is recorded about a job's snapshots in one
+// repository. The list is taken each time the job runs, not live;
+// ListedAt, and Newest, are null when none has been recorded yet.
+type snapshotListStatus struct {
+	Repository string     `json:"repository"`
+	ListedAt   *time.Time `json:"listed_at"`
+	Count      int        `json:"count"`
+	Newest     *time.Time `json:"newest"`
+	// Snapshots are the snapshots themselves, newest first; present only
+	// when a single job was asked for.
+	Snapshots []snapshotStatus `json:"snapshots,omitzero"`
+}
+
+type snapshotStatus struct {
+	ID       string    `json:"id"`
+	ShortID  string    `json:"short_id"`
+	Time     time.Time `json:"time"`
+	Hostname string    `json:"hostname"`
+	Paths    []string  `json:"paths"`
+	Tags     []string  `json:"tags"`
+	// Size and Files are null when restic didn't report them, as are the
+	// figures for what the snapshot changed: files that were new or had
+	// changed, and bytes added to the repository before and after
+	// compression.
+	Size            *int64 `json:"size"`
+	Files           *int64 `json:"files"`
+	FilesNew        *int64 `json:"files_new"`
+	FilesChanged    *int64 `json:"files_changed"`
+	DataAdded       *int64 `json:"data_added"`
+	DataAddedPacked *int64 `json:"data_added_packed"`
 }
 
 type runningStatus struct {
@@ -138,8 +174,9 @@ type repoStatus struct {
 
 // buildStatus assembles the report for every configured job, or for only
 // when it is non-empty. held reports whether a job's lock is currently
-// held, which is what makes a recorded running marker believable.
-func buildStatus(cfg *config.Config, st *state.State, now time.Time, only string, held func(job string) (bool, error)) (statusReport, error) {
+// held, which is what makes a recorded running marker believable, and
+// snapshots returns a job's recorded snapshot lists by repository.
+func buildStatus(cfg *config.Config, st *state.State, now time.Time, only string, held func(job string) (bool, error), snapshots func(job string) (map[string]state.SnapshotList, error)) (statusReport, error) {
 	report := statusReport{
 		FormatVersion: statusFormatVersion,
 		GeneratedAt:   utc(now),
@@ -205,6 +242,12 @@ func buildStatus(cfg *config.Config, st *state.State, now time.Time, only string
 		if only != "" {
 			job.Runs = runs
 		}
+
+		lists, err := snapshots(name)
+		if err != nil {
+			return statusReport{}, fmt.Errorf("job %q: %w", name, err)
+		}
+		job.SnapshotLists = snapshotListStatuses(job.Repositories, lists, only != "")
 		report.Jobs = append(report.Jobs, job)
 	}
 	return report, nil
@@ -246,6 +289,49 @@ func runStatuses(js state.JobState) []runStatus {
 		})
 	}
 	return runs
+}
+
+// snapshotListStatuses reports on each of a job's repositories in turn. A
+// repository with no recorded list gets an entry of nulls, so a consumer
+// can tell "none recorded" from "recorded as empty". full includes the
+// snapshots themselves.
+func snapshotListStatuses(repos []string, lists map[string]state.SnapshotList, full bool) []snapshotListStatus {
+	out := []snapshotListStatus{}
+	for _, repo := range repos {
+		entry := snapshotListStatus{Repository: repo}
+		if full {
+			entry.Snapshots = []snapshotStatus{}
+		}
+		list, ok := lists[repo]
+		if !ok {
+			out = append(out, entry)
+			continue
+		}
+		listedAt := utc(list.ListedAt)
+		entry.ListedAt, entry.Count = &listedAt, len(list.Snapshots)
+		for _, s := range list.Snapshots {
+			t := utc(s.Time)
+			if entry.Newest == nil || t.After(*entry.Newest) {
+				entry.Newest = &t
+			}
+			if full {
+				entry.Snapshots = append(entry.Snapshots, snapshotStatus{
+					ID: s.ID, ShortID: s.ShortID, Time: t, Hostname: s.Hostname,
+					Paths: orEmpty(s.Paths), Tags: orEmpty(s.Tags), Size: s.Size, Files: s.Files,
+					FilesNew: s.FilesNew, FilesChanged: s.FilesChanged, DataAdded: s.DataAdded, DataAddedPacked: s.DataAddedPacked,
+				})
+			}
+		}
+		out = append(out, entry)
+	}
+	return out
+}
+
+func orEmpty(s []string) []string {
+	if s == nil {
+		return []string{}
+	}
+	return s
 }
 
 func utc(t time.Time) time.Time { return t.UTC().Truncate(time.Second) }
@@ -311,7 +397,6 @@ func writeJobHistory(w io.Writer, r statusReport, p color.Painter, loc *time.Loc
 
 	if len(job.Runs) == 0 {
 		fmt.Fprintln(w, "no recorded runs")
-		return
 	}
 	t := table{header: []string{"STARTED", "TOOK", "OUTCOME", "BY"}}
 	for _, run := range job.Runs {
@@ -331,7 +416,70 @@ func writeJobHistory(w io.Writer, r statusReport, p color.Painter, loc *time.Loc
 		}
 		t.add(notes, cell{text: started}, cell{text: duration(run)}, outcomeCell(run.Outcome, p), cell{text: by})
 	}
+	if len(job.Runs) > 0 {
+		t.write(w)
+	}
+
+	for _, list := range job.SnapshotLists {
+		fmt.Fprintln(w)
+		writeSnapshotList(w, list, now, loc)
+	}
+}
+
+// writeSnapshotList prints the snapshots recorded for one repository. The
+// list is as old as the job's last successful run there, so its age is
+// always shown.
+func writeSnapshotList(w io.Writer, list snapshotListStatus, now time.Time, loc *time.Location) {
+	if list.ListedAt == nil {
+		fmt.Fprintf(w, "Snapshots in %s: not listed yet (a list is taken each time the job runs)\n", list.Repository)
+		return
+	}
+	fmt.Fprintf(w, "Snapshots in %s, as of %s: %d\n", list.Repository, ago(now.Sub(*list.ListedAt)), list.Count)
+	if len(list.Snapshots) == 0 {
+		return
+	}
+	t := table{header: []string{"ID", "TIME", "SIZE", "CHANGED"}}
+	for _, s := range list.Snapshots {
+		size := "-"
+		if s.Size != nil {
+			size = humanBytes(*s.Size)
+		}
+		t.add(nil, cell{text: shortID(s.ID)}, cell{text: s.Time.In(loc).Format("2006-01-02 15:04")}, cell{text: size}, cell{text: changed(s)})
+	}
 	t.write(w)
+}
+
+// changed says what a snapshot changed compared with the one before it,
+// or "-" when restic didn't report it. The size is what it added to the
+// repository: after compression where restic says, otherwise before.
+func changed(s snapshotStatus) string {
+	if s.FilesNew == nil || s.FilesChanged == nil {
+		return "-"
+	}
+	text := fmt.Sprintf("%d new, %d changed", *s.FilesNew, *s.FilesChanged)
+	switch {
+	case s.DataAddedPacked != nil:
+		text += ", +" + humanBytes(*s.DataAddedPacked)
+	case s.DataAdded != nil:
+		text += ", +" + humanBytes(*s.DataAdded)
+	}
+	return text
+}
+
+// humanBytes renders a byte count in binary units, as restic does.
+func humanBytes(n int64) string {
+	const unit = 1024
+	if n < unit {
+		return fmt.Sprintf("%d B", n)
+	}
+	value, suffix := float64(n), ""
+	for _, s := range []string{"KiB", "MiB", "GiB", "TiB", "PiB"} {
+		value, suffix = value/unit, s
+		if value < unit {
+			break
+		}
+	}
+	return fmt.Sprintf("%.1f %s", value, suffix)
 }
 
 func outcomeCell(outcome string, p color.Painter) cell {

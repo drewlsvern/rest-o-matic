@@ -13,7 +13,7 @@ you whether it worked.
 - **No daemon.** Your own scheduler runs one command every few minutes, and
   rest-o-matic works out which jobs are due.
 - **One command to see if it's working**, with each job's last result, its
-  error and when it runs next.
+  error, when it runs next and the snapshots it has.
 - **Alerts** when a job starts failing and when it recovers, without one per
   run.
 - **Passwords can be stored encrypted**, so the config is safe to keep in

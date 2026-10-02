@@ -18,6 +18,7 @@ import (
 
 	"github.com/drewlsvern/rest-o-matic/internal/config"
 	"github.com/drewlsvern/rest-o-matic/internal/secrets"
+	"github.com/drewlsvern/rest-o-matic/internal/state"
 )
 
 // ResticRunner invokes the restic binary. Path defaults to "restic" (looked
@@ -263,7 +264,11 @@ func retentionFlag(period string) (string, bool) {
 // Forget runs `restic forget`, scoped to snapshots carrying jobTag, using
 // the resolved effective retention for this (job, repository) pair. Scoping
 // by tag is what keeps a shared repository's other jobs' snapshots safe.
-func (r *ResticRunner) Forget(ctx context.Context, repo config.Repository, jobTag string, retention config.Retention) error {
+//
+// It returns the snapshots the job has left in the repository, which restic
+// reports as part of forgetting, so listing them costs no extra call.
+// listed is false when restic's output held no such list.
+func (r *ResticRunner) Forget(ctx context.Context, repo config.Repository, jobTag string, retention config.Retention) (kept []state.Snapshot, listed bool, err error) {
 	args := []string{"-r", repo.URL, "forget", "--tag", jobTag}
 	for period, count := range retention {
 		flag, ok := retentionFlag(period)
@@ -272,20 +277,22 @@ func (r *ResticRunner) Forget(ctx context.Context, repo config.Repository, jobTa
 		}
 		args = append(args, flag, strconv.Itoa(count))
 	}
-	args = append(args, "--prune")
+	args = append(args, "--prune", "--json")
 
 	env, err := r.repoEnv(repo)
 	if err != nil {
-		return err
+		return nil, false, err
 	}
 	cmd := exec.CommandContext(ctx, r.binary(), args...)
 	cmd.Env = env
 	configureResticCancel(cmd)
-	var stderr bytes.Buffer
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
 
 	if err := cmd.Run(); err != nil {
-		return resticFailure("restic forget failed", err, stderr.String())
+		return nil, false, resticFailure("restic forget failed", err, stderr.String())
 	}
-	return nil
+	kept, listed = keptSnapshots(stdout.Bytes())
+	return kept, listed, nil
 }

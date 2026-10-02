@@ -236,6 +236,85 @@ next check-in.
 Initialising is always an explicit action. Doing it automatically would turn
 a mistyped URL into a new empty repository that backups then succeed into.
 
+### Results are uploaded separately
+
+An action's result is uploaded by the host as soon as the action finishes,
+in a request of its own, not carried in the next check-in. Results can be
+large (a file listing runs to megabytes), and waiting for the next check-in
+would double how long the UI waits.
+
+## Browsing a snapshot
+
+Listing what is inside a snapshot needs the repository and its password, so
+it runs on the host. Asking the host for one folder at a time would cost a
+check-in per click. Instead, the whole listing is loaded once:
+
+1. The UI queues a "list files" action for a snapshot.
+2. At its next check-in the host runs `restic ls` on that snapshot and
+   uploads the complete listing, compressed.
+3. The central app stores it against the snapshot's ID.
+4. Browsing folders, searching by name and sorting by size are then
+   immediate, for as long as the snapshot exists.
+
+A snapshot never changes once written, so a listing never goes stale and
+never needs loading twice. The first view of a snapshot waits about a
+minute.
+
+- **Size.** No limit is expected to matter for the fleets this is built
+  for. A high default limit protects the central app, and can be raised.
+- **File names are stored encrypted.** See
+  [The viewer key](#the-viewer-key) below. Source paths, snapshot paths
+  and error messages are reported in plain text regardless.
+- **What changed, without a listing.** Each snapshot in the regular report
+  already says how many files were new or changed and how much data it
+  added, which often answers the question that prompts a drill-down.
+
+### The viewer key
+
+A listing holds the name of every file in a snapshot, so the central app
+stores listings encrypted and can only read them while someone is signed
+in.
+
+```
+Setup:    the central app creates a viewer keypair
+          public half  → stored as is; hosts lock listings for it
+          private half → stored encrypted with a key derived from the
+                         user's password
+
+Sign-in:  the password unlocks the private half, in memory, for that session
+Browsing: the server unlocks a listing, then serves browsing and search
+Sign-out: the unlocked key is discarded
+```
+
+| Situation | File names readable? |
+|---|---|
+| The database or a backup of it is copied | No |
+| The server's disk is taken while nobody is signed in | No |
+| Someone controls the running server while a user is signed in | Yes |
+
+- **Nothing extra to type.** Signing in is the unlock.
+- **Hosts are unaffected by who is signed in.** They lock a listing for the
+  public half, which the central app hands them, and can upload at any
+  time.
+- **It requires password sign-in,** since the unlocking key is derived from
+  the password. Changing the password re-wraps the private half.
+- **Losing the viewer key loses nothing permanent.** Listings are a cache of
+  what is in the repository. With a forgotten password the app creates a
+  new viewer key and hosts list snapshots again on demand. No backup of
+  this key and no recovery drill are needed, unlike the recovery key for
+  secrets.
+- **Each user has their own wrapped copy** of the private half, made by a
+  signed-in user when the account is created.
+- **It is not the same key as the recovery key,** and must not be. The
+  recovery key opens repository passwords and stays offline; the viewer key
+  opens file names only and lives, wrapped, in the central app.
+
+Unlocking in the browser instead (with a passkey, or a key remembered per
+browser) would mean the server never sees file names at all. It was set
+aside as much more to build for little practical gain, and stays possible
+later: hosts only ever lock for a public key, so they would not notice the
+change.
+
 ## Secrets
 
 Config contains repository passwords and storage credentials. They are
@@ -521,12 +600,14 @@ the central app's repository.
 - **Live agent.** An optional long-running process holding an outbound
   connection, so actions run immediately. It would only speed up delivery;
   cron and `tick` would keep doing the scheduling.
-- **Browsing files inside a snapshot.** Each folder opened is a round trip
-  to the host, which is slow at one check-in per minute.
-- **Restore from the UI.** Restoring to a scratch directory fits the action
-  queue. Moving files into place needs the container stopped, which ties
-  into the planned Quadlet source type. Until then the UI can show the
-  exact restore commands for a chosen snapshot.
+- **Browsing files inside a snapshot.** See
+  [Browsing a snapshot](#browsing-a-snapshot) for the agreed approach. It
+  waits for the action queue.
+- **Restore from the UI.** The natural next step after browsing: pick a
+  file or folder and queue a restore to a scratch directory on the host.
+  Moving files into place needs the container stopped, which ties into the
+  planned Quadlet source type. Until then the UI can show the exact restore
+  commands for a chosen snapshot.
 - **Restore drill.** A periodic check that a recovered password can list
   and restore from a real repository.
 - **Filtering queued commands.** Limiting what `exec` commands the UI may
@@ -567,6 +648,10 @@ the central app's repository.
 - The host's private key lives in the user's config directory, not the state
   directory.
 - A restore drill is a separate, later feature.
+- Snapshot contents are browsed by loading a snapshot's whole listing once
+  and caching it centrally; restoring from that view is the follow-on.
+- File listings are stored encrypted for a viewer key, whose private half
+  is unlocked on the server by the user's password at sign-in.
 - The work is split into separate changes, written one at a time.
 
 ### Accepted as proposed
@@ -588,5 +673,7 @@ the change that implements each one is written.
 
 ### Open
 
+- How users sign in to the central app. File listings need it to be
+  password-based (see [The viewer key](#the-viewer-key)).
 - The layout of the host page and the remaining screens.
-- Login and user accounts for the central app.
+- User accounts for the central app: how many, and who may do what.

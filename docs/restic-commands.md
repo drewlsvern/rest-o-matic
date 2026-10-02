@@ -40,6 +40,10 @@ restic recreates each file's full original path beneath `--target`, so
 `/tmp/restore/home/me/documents/a.txt`. Restore into an empty directory and
 move what you need into place.
 
+`rest-o-matic status <job>` shows the snapshots recorded for a job at its
+last run, without contacting the repository; `exec ... snapshots` asks the
+repository itself.
+
 Every snapshot carries its job's name as a tag, which is how one repository
 can hold several jobs. Data written by rootless Podman containers has to be
 restored through its job; see

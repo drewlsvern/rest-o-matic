@@ -88,7 +88,7 @@ func TestLocked_PasswordAndEnvReachResticAsPlainText(t *testing.T) {
 	if _, err := runner.Backup(context.Background(), repo, config.ReadDirect, []string{f.dir}, []string{"job"}); err != nil {
 		t.Fatalf("Backup: %v", err)
 	}
-	if err := runner.Forget(context.Background(), repo, "job", config.Retention{"daily": 7}); err != nil {
+	if _, _, err := runner.Forget(context.Background(), repo, "job", config.Retention{"daily": 7}); err != nil {
 		t.Fatalf("Forget: %v", err)
 	}
 	if code, err := runner.PassThrough(context.Background(), repo, config.ReadDirect, []string{"snapshots"}); err != nil || code != 0 {
