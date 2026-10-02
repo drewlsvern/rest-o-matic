@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io/fs"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -84,6 +85,20 @@ func TestCLI_StatusReportsFailedRunAndExitsZero(t *testing.T) {
 	for _, want := range []string{"documents", "FAILED", "  nas: backup failed: restic backup failed"} {
 		if !contains(stdout, want) {
 			t.Errorf("expected stdout to contain %q, got: %s", want, stdout)
+		}
+	}
+	// restic's own message, not the JSON it was wrapped in. With restic on
+	// PATH that message says the repository's config file can't be opened;
+	// the wording around it differs between restic versions.
+	if contains(stdout, "message_type") {
+		t.Errorf("status shows restic's raw JSON: %s", stdout)
+	}
+	if _, err := exec.LookPath("restic"); err == nil {
+		state, _ := os.ReadFile(filepath.Join(workdir, ".rest-o-matic", "state.json"))
+		for name, text := range map[string]string{"status": stdout, "the state file": string(state)} {
+			if !contains(text, "unable to open config file") || contains(text, "message_type") {
+				t.Errorf("expected %s to carry restic's plain \"unable to open config file\" message, got: %s", name, text)
+			}
 		}
 	}
 
