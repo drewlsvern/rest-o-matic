@@ -27,7 +27,7 @@ repositories:
   nas: {backend: local, url: /tmp/repo}
 backups:
   documents:
-    source: {paths: ["~/documents"]}
+    source: {paths: ["/home/me/documents"]}
     policy: hot
     repositories: [nas]
 `)
@@ -36,7 +36,7 @@ backups:
 		t.Fatalf("Load: %v", err)
 	}
 	job := cfg.Backups["documents"]
-	if !reflect.DeepEqual(job.Source.Paths, []string{"~/documents"}) {
+	if !reflect.DeepEqual(job.Source.Paths, []string{"/home/me/documents"}) {
 		t.Fatalf("unexpected source paths: %v", job.Source.Paths)
 	}
 }
