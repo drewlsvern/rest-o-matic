@@ -24,7 +24,7 @@
 
 - [x] 4.1 Add a test that's skipped unless `podman` and `restic` are available: create a source with a `0600` file owned by a subordinate uid (via `podman unshare chown`), show that a `direct` backup exits 3, show that a `podman-unshare` backup succeeds, then restore through the wrapped path and check the file's host owner and mode match
 - [x] 4.2 In the same test, confirm that `podman unshare` passes restic's exit code and the `RESTIC_PASSWORD` environment variable through, and that cancelling a wrapped backup's context stops restic (no restic process left, and `restic list locks` is empty afterwards)
-- [ ] 4.3 Make sure the Linux CI job runs it (install Podman in the workflow if the runner lacks it)
+- [x] 4.3 Make sure the Linux CI job runs it (install Podman in the workflow if the runner lacks it)
 
 ## 5. Docs and Verification
 
