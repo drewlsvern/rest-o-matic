@@ -112,12 +112,27 @@ func repositoryNames(job config.Job) []string {
 // that can't be written is warned about but never changes the job's
 // outcome.
 func executeAndRecord(work, cleanup context.Context, cfg *config.Config, store *state.Store, name string, opts execution.Options, trigger string) execution.JobResult {
+	// What the job's last run left behind decides which notifications
+	// apply. The job lock is held, so it can't change during the run. If
+	// it can't be read the job counts as never run, which errs towards
+	// notifying.
+	if st, err := store.Load(); err == nil {
+		js := st.Jobs[name]
+		opts.Prior = execution.Prior{
+			Failed:          js.LastOutcome == state.OutcomeFailed,
+			LastRun:         js.LastRun,
+			FailingSince:    js.FailingSince,
+			FailureNotified: js.FailureNotified,
+		}
+	}
+
 	started := time.Now()
 	warnStateNotSaved(name, store.MarkRunning(name, started, trigger))
 
 	result := execution.RunJob(work, cleanup, cfg, name, opts)
 
-	warnStateNotSaved(name, store.RecordRun(name, runRecord(result, started, time.Now(), trigger)))
+	failing := state.Failing{Since: result.FailingSince, Notified: result.FailureNotified}
+	warnStateNotSaved(name, store.RecordRun(name, runRecord(result, started, time.Now(), trigger), failing))
 	return result
 }
 
@@ -190,5 +205,8 @@ func printResult(r execution.JobResult) {
 	}
 	for _, err := range r.OutcomeHookErrs {
 		fmt.Printf("  %s: %v\n", color.Stdout.Warn(outcomeHook+" hook failed"), err)
+	}
+	for _, err := range r.NotifyErrs {
+		fmt.Printf("  %s: %v\n", color.Stdout.Warn("notification failed"), err)
 	}
 }

@@ -557,3 +557,58 @@ func TestRunRecord_FromJobResult(t *testing.T) {
 		}
 	})
 }
+
+func TestStatus_FailingSince(t *testing.T) {
+	now := ts(t, "2026-10-01T19:04:00Z")
+	since := ts(t, "2026-09-28T02:00:03Z")
+	failedRun := func(started string) state.RunRecord {
+		return state.RunRecord{
+			Started: ts(t, started), Finished: ts(t, started).Add(48 * time.Second),
+			Outcome: state.OutcomeFailed, Trigger: state.TriggerTick, Error: "hook failed",
+		}
+	}
+	longFailing := withRuns(failedRun("2026-10-01T17:00:00Z"), failedRun("2026-09-30T17:00:00Z"))
+	longFailing.FailingSince = &since
+	firstFailure := ts(t, "2026-10-01T17:00:00Z")
+	justFailed := withRuns(failedRun("2026-10-01T17:00:00Z"))
+	justFailed.FailingSince = &firstFailure
+
+	st := &state.State{Jobs: map[string]state.JobState{
+		"gitea":     longFailing,
+		"postgres":  justFailed,
+		"documents": withRuns(state.RunRecord{Finished: ts(t, "2026-10-01T02:01:00Z"), Outcome: state.OutcomeSuccess}),
+		// From a version that didn't track it: only the last run is known.
+		"media": {LastRun: ts(t, "2026-09-27T00:05:00Z"), LastOutcome: state.OutcomeFailed},
+	}}
+	r := mustStatus(t, st, now, "", notHeld)
+
+	if got := jobNamed(t, r, "gitea").FailingSince; got == nil || !got.Equal(ts(t, "2026-09-28T02:00:03Z")) {
+		t.Errorf("gitea: got failing since %v, want the recorded time", got)
+	}
+	if got := jobNamed(t, r, "documents").FailingSince; got != nil {
+		t.Errorf("documents: got failing since %v for a healthy job, want null", got)
+	}
+	if got := jobNamed(t, r, "media").FailingSince; got == nil || !got.Equal(ts(t, "2026-09-27T00:05:00Z")) {
+		t.Errorf("media: got failing since %v, want its last run for an earlier-format record", got)
+	}
+
+	data, err := json.Marshal(r)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(data), `"failing_since":"2026-09-28T02:00:03Z"`) || !strings.Contains(string(data), `"failing_since":null`) {
+		t.Errorf("expected failing_since in the JSON, set for a failing job and null for a healthy one: %s", data)
+	}
+
+	// The table says so once a job has failed more than once in a row.
+	out := render(r)
+	lines := strings.Split(out, "\n")
+	for i, line := range lines {
+		if strings.HasPrefix(line, "gitea ") && (lines[i+1] != "  failing since 3 days ago" || lines[i+2] != "  hook failed") {
+			t.Errorf("expected a failing-since line, then the error, under gitea, got:\n%s", out)
+		}
+	}
+	if strings.Count(out, "failing since") != 1 {
+		t.Errorf("only the job failing for more than one run should get the line, got:\n%s", out)
+	}
+}

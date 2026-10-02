@@ -20,6 +20,50 @@ type Config struct {
 	Policies     map[string]Policy     `yaml:"policies"`
 	Repositories map[string]Repository `yaml:"repositories"`
 	Backups      map[string]Job        `yaml:"backups"`
+
+	// Notify holds commands that apply to every job.
+	Notify Notify `yaml:"notify"`
+}
+
+// Notify are commands that tell someone about a job, written once for
+// every job. Unlike a job's own hooks, which are actions tied to each run,
+// they report a change: Failure runs when a job starts failing and then at
+// most once a day while it keeps failing, Recovery on the first success
+// after a failure, and Success after every success.
+type Notify struct {
+	Failure  []string
+	Recovery []string
+	Success  []string
+}
+
+// UnmarshalYAML accepts a mapping of `failure`, `recovery` and `success`
+// lists. Unknown keys are rejected so a misspelt one can't silently mean
+// "never notified".
+func (n *Notify) UnmarshalYAML(value *yaml.Node) error {
+	switch {
+	case value.Kind == yaml.ScalarNode && value.Tag == "!!null":
+		return nil
+	case value.Kind != yaml.MappingNode:
+		return fmt.Errorf("line %d: notify: must be a map of failure/recovery/success", value.Line)
+	}
+	for i := 0; i+1 < len(value.Content); i += 2 {
+		key, val := value.Content[i], value.Content[i+1]
+		var dst *[]string
+		switch key.Value {
+		case "failure":
+			dst = &n.Failure
+		case "recovery":
+			dst = &n.Recovery
+		case "success":
+			dst = &n.Success
+		default:
+			return fmt.Errorf("line %d: notify: unknown key %q (want failure, recovery, or success)", key.Line, key.Value)
+		}
+		if err := val.Decode(dst); err != nil {
+			return fmt.Errorf("notify.%s: %w", key.Value, err)
+		}
+	}
+	return nil
 }
 
 // Retention maps a restic keep-period name (hourly, daily, weekly, monthly,

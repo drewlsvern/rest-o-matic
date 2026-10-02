@@ -320,7 +320,7 @@ func TestDispatch_DoesNotRepeatJobRunMeanwhile(t *testing.T) {
 	f := newConcurrencyFixture(t)
 	cfg := f.config(2, f.job("documents", "nas"))
 
-	if err := f.store.RecordRun("documents", state.RunRecord{Finished: time.Now(), Outcome: state.OutcomeSuccess}); err != nil {
+	if err := f.store.RecordRun("documents", state.RunRecord{Finished: time.Now(), Outcome: state.OutcomeSuccess}, state.Failing{}); err != nil {
 		t.Fatal(err)
 	}
 

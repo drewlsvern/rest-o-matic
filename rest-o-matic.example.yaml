@@ -102,6 +102,22 @@
 #     password_file: /run/secrets/restic-sftp-password
 
 # ---------------------------------------------------------------------------
+# Notify: commands that apply to every job, so a failed backup is reported
+# without each job needing its own hook. See "Notifications" in the README.
+# ---------------------------------------------------------------------------
+# notify:
+#   # When a job starts failing, then at most once every 24 hours while it
+#   # keeps failing.
+#   failure:
+#     - 'curl -fsS -d "$RESTOMATIC_JOB failed: $RESTOMATIC_ERROR" https://ntfy.example.com/backups'
+#   # Once, on the first successful run after a failure.
+#   recovery:
+#     - 'curl -fsS -d "$RESTOMATIC_JOB is working again" https://ntfy.example.com/backups'
+#   # After every successful run.
+#   success:
+#     - "curl -fsS https://hc-ping.com/<ping-key>/$RESTOMATIC_JOB"
+
+# ---------------------------------------------------------------------------
 # Backups: named jobs, each composing a Source, one or more Repositories, a
 # Policy, and optional Hooks.
 # ---------------------------------------------------------------------------
