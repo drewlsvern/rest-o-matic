@@ -77,7 +77,7 @@
 #     # Exactly one of these three is typical for supplying the repo password:
 #     password: correct-horse-battery-staple
 #     # ...or the same password locked for this host's key, so the config
-#     # holds no plain-text secret (see "Secrets" in the README; create the
+#     # holds no plain-text secret (see docs/secrets.md; create the
 #     # value with `rest-o-matic secret lock`):
 #     # password: !locked "YWdlLWVuY3J5cHRpb24ub3JnL3YxCi0+IFgyNTUxOSA..."
 #     # password_file: /run/secrets/restic-nas-password
@@ -103,7 +103,7 @@
 
 # ---------------------------------------------------------------------------
 # Notify: commands that apply to every job, so a failed backup is reported
-# without each job needing its own hook. See "Notifications" in the README.
+# without each job needing its own hook. See docs/notifications.md.
 # ---------------------------------------------------------------------------
 # notify:
 #   # When a job starts failing, then at most once every 24 hours while it
@@ -130,8 +130,8 @@
 #       # Other source types (container, quadlet, command) are planned but
 #       # not implemented yet.
 #       paths:
-#         - ~/documents
-#         - ~/photos
+#         - /home/me/documents
+#         - /home/me/photos
 #
 #     policy: hot
 #
