@@ -10,6 +10,7 @@ import (
 
 	"github.com/drewlsvern/rest-o-matic/internal/config"
 	"github.com/drewlsvern/rest-o-matic/internal/lock"
+	"github.com/drewlsvern/rest-o-matic/internal/statedir"
 )
 
 // Reserved exit codes for when exec refuses to invoke restic at all. Chosen
@@ -19,8 +20,9 @@ import (
 // not be read). Whenever restic is actually invoked, its own exit code is
 // propagated untouched instead of either of these - see PassThrough.
 const (
-	ExitLockBlocked = 20
-	ExitGateBlocked = 21
+	ExitLockBlocked     = 20
+	ExitGateBlocked     = 21
+	ExitStateDirBlocked = 22
 )
 
 // sharedLockSubcommands lists restic subcommands understood to take only a
@@ -43,6 +45,10 @@ var sharedLockSubcommands = map[string]struct{}{
 	"mount":     {},
 	"restore":   {},
 }
+
+// checkStateDir is statedir.Check; a variable so tests can fake another
+// owner without running as root.
+var checkStateDir = statedir.Check
 
 func requiresExclusiveLock(subcommand string) bool {
 	_, shared := sharedLockSubcommands[subcommand]
@@ -108,6 +114,10 @@ const (
 	// BlockedByGate means the tag-safety gate refused the command; no
 	// option bypasses this, the command itself must change.
 	BlockedByGate BlockReason = "gate"
+	// BlockedByStateDir means the state directory (or a file in it) is
+	// owned by another user, so taking the lock would create files that
+	// lock that user out; see internal/statedir.
+	BlockedByStateDir BlockReason = "state-dir"
 )
 
 // ExecResult describes the outcome of an exec invocation.
@@ -116,9 +126,12 @@ type ExecResult struct {
 	Blocked    BlockReason
 	// SharingJobs is populated only when Blocked == BlockedByGate.
 	SharingJobs []string
+	// StateDirErr is populated only when Blocked == BlockedByStateDir.
+	StateDirErr *statedir.OwnerError
 	// ExitCode is restic's own exit code when restic was actually
 	// invoked (Blocked == NotBlocked), or one of the reserved
-	// ExitLockBlocked/ExitGateBlocked constants otherwise.
+	// ExitLockBlocked/ExitGateBlocked/ExitStateDirBlocked constants
+	// otherwise.
 	ExitCode int
 }
 
@@ -148,6 +161,17 @@ func Exec(ctx context.Context, cfg *config.Config, repoName string, args []strin
 	}
 
 	if !force && requiresExclusiveLock(subcommand) {
+		// Only this path creates files in the state directory, so only
+		// this path needs the ownership check.
+		if opts.StateDir != "" {
+			if err := checkStateDir(opts.StateDir); err != nil {
+				var oe *statedir.OwnerError
+				if !errors.As(err, &oe) {
+					return ExecResult{}, err
+				}
+				return ExecResult{Repository: repoName, Blocked: BlockedByStateDir, StateDirErr: oe, ExitCode: ExitStateDirBlocked}, nil
+			}
+		}
 		l, acquired, err := lock.AcquireRepository(opts.LockDir, repoName)
 		if err != nil {
 			return ExecResult{}, fmt.Errorf("acquiring lock for repository %q: %w", repoName, err)
