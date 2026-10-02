@@ -25,7 +25,7 @@ If any `before` hook exits with a non-zero status, the job SHALL NOT proceed to 
 - **THEN** no `restic backup` invocation SHALL be attempted for any of the job's repositories, the always hooks and then the failure hooks SHALL run, the success hooks SHALL NOT run, and the job's outcome SHALL be recorded as failed
 
 ### Requirement: Job Outcome Selects Success or Failure Hooks
-A job SHALL be considered successful only if its `before` hooks succeeded, every configured repository's backup and retention enforcement succeeded, and every `always` command succeeded. Otherwise it SHALL be considered failed. This includes a repository deferred because another execution held its lock, and an execution interrupted by a signal. The `success` hooks SHALL run only for a successful job, and the `failure` hooks only for a failed one. A failing `success` or `failure` command SHALL be reported but SHALL NOT change the job's outcome.
+A job SHALL be considered successful only if its `before` hooks succeeded, every configured repository's backup and retention enforcement succeeded, and every `always` command succeeded. Otherwise it SHALL be considered failed. This includes an execution interrupted by a signal. The `success` hooks SHALL run only for a successful job, and the `failure` hooks only for a failed one. A failing `success` or `failure` command SHALL be reported but SHALL NOT change the job's outcome.
 
 #### Scenario: Failed always command fails the job
 - **WHEN** every repository backup succeeds but an `always` command exits non-zero
@@ -49,7 +49,7 @@ Within each of the `always`, `success` and `failure` lists, every command SHALL 
 ### Requirement: Hook Environment
 Every hook command SHALL run with the calling environment plus `RESTOMATIC_JOB` set to the job's name. `success` and `failure` commands SHALL additionally receive:
 - `RESTOMATIC_OUTCOME`: `success` or `failure`;
-- `RESTOMATIC_FAILED_REPOS`: a comma-separated list of repositories whose backup or retention enforcement failed or was deferred, empty if none; and
+- `RESTOMATIC_FAILED_REPOS`: a comma-separated list of repositories whose backup or retention enforcement failed, empty if none; and
 - `RESTOMATIC_ERROR`: a one-line description of the first failure, empty on success.
 
 #### Scenario: Failure hook sees the outcome and failed repository

@@ -43,12 +43,7 @@ once they've all finished.`,
 		now := time.Now()
 		var due []string
 		for name := range cfg.Backups {
-			sched, err := cfg.EffectiveSchedule(name)
-			if err != nil {
-				fmt.Println(color.Stdout.Warn("skipping job"), name+":", err)
-				continue
-			}
-			isDue, err := schedule.Due(sched, st.Jobs[name].LastRun, now)
+			isDue, err := jobDue(cfg, st, name, now)
 			if err != nil {
 				fmt.Println(color.Stdout.Warn("skipping job"), name+":", err)
 				continue
@@ -65,49 +60,86 @@ once they've all finished.`,
 		opts := execution.Options{Restic: execution.NewResticRunner(), LockDir: lockDir()}
 		work, cleanup, stop := interruptContexts()
 		defer stop()
-		results := dispatch(work, cleanup, cfg, store, due, opts)
+		attempts := dispatch(work, cleanup, cfg, store, due, opts)
 
-		failed, skipped := 0, len(due)-len(results)
-		for _, r := range results {
-			printResult(r)
-			if !r.Success() {
-				failed++
+		// A job another execution ran in the meantime was not due after
+		// all, so it leaves the count.
+		total, succeeded, failed, running := len(due), 0, 0, 0
+		for _, a := range attempts {
+			switch a.kind {
+			case jobRan:
+				printResult(a.result)
+				if a.result.Success() {
+					succeeded++
+				} else {
+					failed++
+				}
+			case jobAlreadyRunning:
+				fmt.Printf("job %s: %s, skipped\n", a.result.Job, color.Stdout.Warn("already running"))
+				running++
+			case jobNotDue:
+				total--
 			}
 		}
-		succeeded := fmt.Sprintf("%d succeeded", len(results)-failed)
-		if len(results)-failed > 0 {
-			succeeded = color.Stdout.Success(succeeded)
+		notStarted := total - succeeded - failed - running
+
+		succeededMsg := fmt.Sprintf("%d succeeded", succeeded)
+		if succeeded > 0 {
+			succeededMsg = color.Stdout.Success(succeededMsg)
 		}
 		failedMsg := fmt.Sprintf("%d failed", failed)
 		if failed > 0 {
 			failedMsg = color.Stdout.Error(failedMsg)
 		}
-		summary := fmt.Sprintf("tick: %d job(s) due, %s, %s", len(due), succeeded, failedMsg)
-		if skipped > 0 {
-			summary += ", " + color.Stdout.Warn(fmt.Sprintf("%d not started", skipped)) + fmt.Sprintf(" (%v)", context.Cause(work))
+		summary := fmt.Sprintf("tick: %d job(s) due, %s, %s", total, succeededMsg, failedMsg)
+		if running > 0 {
+			summary += fmt.Sprintf(", %d already running", running)
+		}
+		if notStarted > 0 {
+			summary += ", " + color.Stdout.Warn(fmt.Sprintf("%d not started", notStarted)) + fmt.Sprintf(" (%v)", context.Cause(work))
 		}
 		fmt.Println(summary)
-		if failed > 0 || skipped > 0 {
-			return fmt.Errorf("%d/%d due job(s) failed or not started", failed+skipped, len(due))
+		if failed > 0 || notStarted > 0 {
+			return fmt.Errorf("%d/%d due job(s) failed or not started", failed+notStarted, total)
 		}
 		return nil
 	},
 }
 
+// jobDue reports whether the named job's schedule says it should run at
+// now, given its last recorded run in st.
+func jobDue(cfg *config.Config, st *state.State, name string, now time.Time) (bool, error) {
+	sched, err := cfg.EffectiveSchedule(name)
+	if err != nil {
+		return false, err
+	}
+	return schedule.Due(sched, st.Jobs[name].LastRun, now)
+}
+
+// attempt is what became of one due job in a tick. result is meaningful
+// only for jobRan; for the other kinds only result.Job may be set.
+type attempt struct {
+	result execution.JobResult
+	kind   startKind
+}
+
 // dispatch runs the due set through an in-process worker pool bounded to
 // cfg.MaxConcurrent, preserving the FIFO order of due (jobs are already
-// sorted by the caller). Each job execution additionally takes a
-// cross-process concurrency slot and per-repository locks (see exec.go and
-// internal/lock), so the same cap holds even if another process (a
-// concurrently-running tick, or a manual `run`) is also executing jobs.
+// sorted by the caller). Each job execution additionally takes its own
+// job lock, its repositories' locks and a concurrency slot, all
+// cross-process (see exec.go and internal/lock), so the same rules hold
+// even if another process (a concurrently-running tick, or a manual `run`)
+// is also executing jobs.
 //
-// Once work is cancelled no further job starts; the returned results cover
-// only the jobs that did, in due order.
-func dispatch(work, cleanup context.Context, cfg *config.Config, store *state.Store, due []string, opts execution.Options) []execution.JobResult {
+// Once work is cancelled no further job starts. The returned attempts are
+// in due order, one per job.
+func dispatch(work, cleanup context.Context, cfg *config.Config, store *state.Store, due []string, opts execution.Options) []attempt {
 	sem := make(chan struct{}, cfg.MaxConcurrent)
 	var wg sync.WaitGroup
-	results := make([]execution.JobResult, len(due))
-	report := make([]bool, len(due))
+	attempts := make([]attempt, len(due))
+	for i := range attempts {
+		attempts[i].kind = jobNotStarted
+	}
 
 	for i, name := range due {
 		select {
@@ -121,16 +153,21 @@ func dispatch(work, cleanup context.Context, cfg *config.Config, store *state.St
 		go func(i int, name string) {
 			defer wg.Done()
 			defer func() { <-sem }()
-			results[i], report[i] = executeWithSlot(work, cleanup, cfg, store, name, opts)
+			// The due list was worked out before any job started, and
+			// this job may have waited behind sem since. If another
+			// execution has run it meanwhile, it must not run again. A
+			// state that can't be read leaves the earlier answer standing.
+			stillDue := func() bool {
+				st, err := store.Load()
+				if err != nil {
+					return true
+				}
+				isDue, err := jobDue(cfg, st, name, time.Now())
+				return err != nil || isDue
+			}
+			attempts[i].result, attempts[i].kind = executeWithSlot(work, cleanup, cfg, store, name, opts, stillDue)
 		}(i, name)
 	}
 	wg.Wait()
-
-	var ran []execution.JobResult
-	for i := range due {
-		if report[i] {
-			ran = append(ran, results[i])
-		}
-	}
-	return ran
+	return attempts
 }

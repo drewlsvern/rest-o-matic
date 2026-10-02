@@ -8,9 +8,11 @@
 package lock
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
+	"time"
 
 	"github.com/gofrs/flock"
 )
@@ -28,17 +30,14 @@ func (l *Lock) Unlock() error {
 	return l.fl.Unlock()
 }
 
-// AcquireRepository takes a non-blocking exclusive lock scoped to a single
-// repository name, so that no two processes - two ticks, a tick and a
-// manual run, or two manual runs - ever run a restic operation against the
-// same repository at the same time. ok is false (with a nil error) if
-// another process currently holds the lock; the caller should defer the
-// job rather than treat that as a failure.
-func AcquireRepository(lockDir, repoName string) (l *Lock, ok bool, err error) {
+// tryFile takes a non-blocking exclusive lock on name inside lockDir,
+// creating the directory if needed. ok is false (with a nil error) if
+// another process or lock currently holds it.
+func tryFile(lockDir, name string) (l *Lock, ok bool, err error) {
 	if err := os.MkdirAll(lockDir, 0o755); err != nil {
 		return nil, false, fmt.Errorf("creating lock dir %s: %w", lockDir, err)
 	}
-	path := filepath.Join(lockDir, "repo-"+repoName+".lock")
+	path := filepath.Join(lockDir, name)
 	fl := flock.New(path)
 	locked, err := fl.TryLock()
 	if err != nil {
@@ -48,6 +47,62 @@ func AcquireRepository(lockDir, repoName string) (l *Lock, ok bool, err error) {
 		return nil, false, nil
 	}
 	return &Lock{fl: fl}, true, nil
+}
+
+// waitInterval is how often a waiting acquisition retries. flock has no
+// cancellable wait, so waiting is a polled retry. A variable so tests can
+// shorten it.
+var waitInterval = time.Second
+
+// wait retries try until it succeeds or ctx is cancelled, in which case it
+// returns ctx's cause. onWait, if non-nil, is called once, when the first
+// attempt finds the lock held.
+func wait(ctx context.Context, try func() (*Lock, bool, error), onWait func()) (*Lock, error) {
+	for waiting := false; ; waiting = true {
+		l, ok, err := try()
+		if err != nil {
+			return nil, err
+		}
+		if ok {
+			return l, nil
+		}
+		if !waiting && onWait != nil {
+			onWait()
+		}
+		select {
+		case <-ctx.Done():
+			return nil, context.Cause(ctx)
+		case <-time.After(waitInterval):
+		}
+	}
+}
+
+// AcquireJob takes a non-blocking exclusive lock scoped to a single job
+// name, so that a job is never executed twice at once - by two ticks, a
+// tick and a manual run, or two manual runs. It is taken before the job
+// waits for anything else, so a job that is queued counts as held too. ok
+// is false (with a nil error) if another execution of the job is running
+// or waiting.
+func AcquireJob(lockDir, jobName string) (l *Lock, ok bool, err error) {
+	return tryFile(lockDir, "job-"+jobName+".lock")
+}
+
+// AcquireRepository takes a non-blocking exclusive lock scoped to a single
+// repository name, so that no two processes - two ticks, a tick and a
+// manual run, or two manual runs - ever run a restic operation against the
+// same repository at the same time. ok is false (with a nil error) if
+// another process currently holds the lock; exec refuses in that case,
+// while jobs wait (see WaitRepository).
+func AcquireRepository(lockDir, repoName string) (l *Lock, ok bool, err error) {
+	return tryFile(lockDir, "repo-"+repoName+".lock")
+}
+
+// WaitRepository is AcquireRepository for a caller that would rather wait
+// than be turned away: it retries until the lock is free or ctx is
+// cancelled (returning ctx's cause). onWait is called once if it has to
+// wait.
+func WaitRepository(ctx context.Context, lockDir, repoName string, onWait func()) (*Lock, error) {
+	return wait(ctx, func() (*Lock, bool, error) { return AcquireRepository(lockDir, repoName) }, onWait)
 }
 
 // AcquireSlot takes a non-blocking exclusive lock on the first available of
@@ -74,4 +129,12 @@ func AcquireSlot(lockDir string, maxConcurrent int) (l *Lock, ok bool, err error
 		}
 	}
 	return nil, false, nil
+}
+
+// WaitSlot is AcquireSlot for a caller that would rather wait than be
+// turned away: it retries across every slot until one is free or ctx is
+// cancelled (returning ctx's cause). onWait is called once if it has to
+// wait.
+func WaitSlot(ctx context.Context, lockDir string, maxConcurrent int, onWait func()) (*Lock, error) {
+	return wait(ctx, func() (*Lock, bool, error) { return AcquireSlot(lockDir, maxConcurrent) }, onWait)
 }

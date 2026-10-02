@@ -350,7 +350,7 @@ rest-o-matic run documents
 
 ## Concurrency
 
-Two rules govern which jobs run at the same time, both enforced with
+Three rules govern which jobs run at the same time, all enforced with
 ordinary file locks so they hold even across independently invoked
 processes (two overlapping ticks, or a tick and a manual `run`):
 
@@ -358,6 +358,25 @@ processes (two overlapping ticks, or a tick and a manual `run`):
   restic's own repository locking makes this a correctness requirement, not
   just a performance one.
 - No more than `max_concurrent` jobs run at once, period.
+- A job never runs **twice at once**.
+
+A job that can't start yet **waits**. Before anything of it runs, a job
+takes every repository it backs up to and a free slot; if one is in use, it
+waits and then starts as soon as it's free, in the same invocation. Its
+hooks don't run while it waits, so a `before` hook that stops a container
+only does so once the backup can actually begin. `tick` and `run` print a
+line when a job starts waiting, and may stay running for as long as the job
+ahead takes. When several jobs are waiting for the same repository, all of
+them run, but the order they go in isn't guaranteed.
+
+A job that is already running, or already waiting, isn't started again. A
+`tick` that finds such a job due reports it as `already running, skipped`
+without running its hooks and without counting it as a failure, so a
+backup that takes longer than your cron interval is fine. `run <job>`
+refuses with an error instead.
+
+`exec` doesn't wait: if a repository is in use it refuses at once (see
+below).
 
 ### One user per state directory
 

@@ -1,28 +1,4 @@
-# concurrency-control Specification
-
-## Purpose
-
-Defines the two-tier execution guard applied to the set of due jobs, ensuring restic's own repository-level locking is never violated and that host resource usage stays within a configurable bound, even across separate tick invocations.
-
-## Requirements
-
-### Requirement: Per-Repository Mutual Exclusion
-Two job executions that target the same repository SHALL NOT run concurrently against it. This SHALL hold even when the two executions were triggered by different jobs, and even when one execution was started by a prior tick invocation and is still running when a new tick occurs.
-
-#### Scenario: Two jobs sharing a repository do not run concurrently
-- **WHEN** job A and job B both target repository `nas` and both become due at the same tick
-- **THEN** the system SHALL run at most one of them against `nas` at a time, deferring the other until the first finishes
-
-#### Scenario: A still-running job from a prior tick blocks a new execution against the same repository
-- **WHEN** a tick starts a job against repository `nas` that takes longer than the interval before the next tick occurs, and another job targeting `nas` becomes due on that next tick
-- **THEN** the newly due job SHALL be deferred rather than started concurrently against `nas`
-
-### Requirement: Global Concurrency Cap
-The total number of job executions running at the same time, across all repositories, SHALL NOT exceed a configurable maximum. This cap SHALL apply regardless of how many jobs are simultaneously due.
-
-#### Scenario: Due jobs beyond the cap are deferred
-- **WHEN** the configured maximum concurrent executions is 2 and 4 jobs become due at the same tick with no repository overlap between them
-- **THEN** at most 2 SHALL run at the same time, with the remaining 2 deferred until a running slot frees up
+## MODIFIED Requirements
 
 ### Requirement: FIFO Queuing of Deferred Jobs
 A job that cannot start immediately because of the per-repository rule or the global cap SHALL be queued rather than skipped or dropped, and SHALL be started, in order of when it became due, as soon as it is no longer blocked by either rule.

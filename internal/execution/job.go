@@ -7,7 +7,6 @@ import (
 	"time"
 
 	"github.com/drewlsvern/rest-o-matic/internal/config"
-	"github.com/drewlsvern/rest-o-matic/internal/lock"
 )
 
 // Options bundles what RunJob needs beyond the config and job name.
@@ -24,13 +23,12 @@ type Options struct {
 // one repository.
 type RepoOutcome struct {
 	Repository string
-	Deferred   bool // true if a lock held by another execution blocked this repo this pass
 	BackupErr  error
 	ForgetErr  error
 }
 
 func (o RepoOutcome) ok() bool {
-	return !o.Deferred && o.BackupErr == nil && o.ForgetErr == nil
+	return o.BackupErr == nil && o.ForgetErr == nil
 }
 
 // JobResult is the aggregated outcome of one job execution.
@@ -80,7 +78,7 @@ const maxErrorEnvLen = 500
 //  1. before hooks (once; the first failure stops them and aborts all
 //     repository backups)
 //  2. an independent backup+forget attempt against each configured
-//     repository, each guarded by that repository's cross-process lock
+//     repository
 //  3. after.always hooks (once, on every outcome)
 //  4. after.success or after.failure hooks (once, depending on the outcome
 //     including step 3)
@@ -88,6 +86,10 @@ const maxErrorEnvLen = 500
 // work stops steps 1-2 when cancelled (the first SIGINT/SIGTERM); the after
 // hooks still run under cleanup, which a second signal cancels. Once work
 // is cancelled the after hooks are also limited to cleanupGrace.
+//
+// RunJob takes no locks. The caller must already hold the cross-process
+// lock of every repository the job backs up to, so that nothing of the job
+// runs until all of it can.
 func RunJob(work, cleanup context.Context, cfg *config.Config, jobName string, opts Options) JobResult {
 	job := cfg.Backups[jobName]
 	result := JobResult{Job: jobName}
@@ -164,8 +166,6 @@ func firstFailure(r JobResult) string {
 	}
 	for _, ro := range r.Repos {
 		switch {
-		case ro.Deferred:
-			return fmt.Sprintf("repository %s deferred: locked by another execution", ro.Repository)
 		case ro.BackupErr != nil:
 			return fmt.Sprintf("repository %s: %v", ro.Repository, ro.BackupErr)
 		case ro.ForgetErr != nil:
@@ -190,17 +190,6 @@ func oneLine(s string) string {
 
 func runRepo(ctx context.Context, cfg *config.Config, jobName, repoName string, tags []string, opts Options) RepoOutcome {
 	outcome := RepoOutcome{Repository: repoName}
-
-	l, ok, err := lock.AcquireRepository(opts.LockDir, repoName)
-	if err != nil {
-		outcome.BackupErr = fmt.Errorf("acquiring lock for repository %q: %w", repoName, err)
-		return outcome
-	}
-	if !ok {
-		outcome.Deferred = true
-		return outcome
-	}
-	defer l.Unlock()
 
 	repo := cfg.Repositories[repoName]
 	job := cfg.Backups[jobName]
