@@ -1,6 +1,11 @@
 package lock
 
-import "testing"
+import (
+	"context"
+	"errors"
+	"testing"
+	"time"
+)
 
 func TestAcquireRepository_SecondAttemptDeferred(t *testing.T) {
 	dir := t.TempDir()
@@ -94,4 +99,174 @@ func TestAcquireSlot_FreesUpAfterUnlock(t *testing.T) {
 		t.Fatalf("re-acquire after unlock: ok=%v err=%v", ok2, err)
 	}
 	defer l2.Unlock()
+}
+
+func TestAcquireJob_SecondAttemptRefusedUntilUnlock(t *testing.T) {
+	dir := t.TempDir()
+
+	l1, ok1, err := AcquireJob(dir, "gitea")
+	if err != nil || !ok1 {
+		t.Fatalf("first acquire: ok=%v err=%v", ok1, err)
+	}
+
+	if _, ok2, err := AcquireJob(dir, "gitea"); err != nil || ok2 {
+		t.Fatalf("second acquire of a held job: ok=%v err=%v, want ok=false", ok2, err)
+	}
+
+	if err := l1.Unlock(); err != nil {
+		t.Fatalf("unlock: %v", err)
+	}
+	l3, ok3, err := AcquireJob(dir, "gitea")
+	if err != nil || !ok3 {
+		t.Fatalf("re-acquire after unlock: ok=%v err=%v", ok3, err)
+	}
+	defer l3.Unlock()
+}
+
+func TestAcquireJob_DifferentJobsDoNotConflict(t *testing.T) {
+	dir := t.TempDir()
+
+	l1, ok1, err := AcquireJob(dir, "gitea")
+	if err != nil || !ok1 {
+		t.Fatalf("gitea acquire: ok=%v err=%v", ok1, err)
+	}
+	defer l1.Unlock()
+
+	l2, ok2, err := AcquireJob(dir, "postgres")
+	if err != nil || !ok2 {
+		t.Fatalf("postgres acquire: ok=%v err=%v", ok2, err)
+	}
+	defer l2.Unlock()
+}
+
+// A job and a repository of the same name use different lock files.
+func TestAcquireJob_DoesNotConflictWithRepositoryOfSameName(t *testing.T) {
+	dir := t.TempDir()
+
+	l1, ok1, err := AcquireJob(dir, "nas")
+	if err != nil || !ok1 {
+		t.Fatalf("job acquire: ok=%v err=%v", ok1, err)
+	}
+	defer l1.Unlock()
+
+	l2, ok2, err := AcquireRepository(dir, "nas")
+	if err != nil || !ok2 {
+		t.Fatalf("repository acquire: ok=%v err=%v", ok2, err)
+	}
+	defer l2.Unlock()
+}
+
+func shortenWait(t *testing.T) {
+	t.Helper()
+	old := waitInterval
+	waitInterval = 5 * time.Millisecond
+	t.Cleanup(func() { waitInterval = old })
+}
+
+func TestWaitRepository_ReturnsOnceHolderUnlocks(t *testing.T) {
+	shortenWait(t)
+	dir := t.TempDir()
+
+	held, ok, err := AcquireRepository(dir, "nas")
+	if err != nil || !ok {
+		t.Fatalf("setup acquire: ok=%v err=%v", ok, err)
+	}
+
+	waited := make(chan struct{})
+	got := make(chan error, 1)
+	go func() {
+		l, err := WaitRepository(context.Background(), dir, "nas", func() { close(waited) })
+		if err == nil {
+			defer l.Unlock()
+		}
+		got <- err
+	}()
+
+	select {
+	case <-waited:
+	case <-time.After(5 * time.Second):
+		t.Fatal("onWait was not called while the repository was held")
+	}
+	select {
+	case err := <-got:
+		t.Fatalf("WaitRepository returned while the repository was held: %v", err)
+	case <-time.After(50 * time.Millisecond):
+	}
+
+	if err := held.Unlock(); err != nil {
+		t.Fatalf("unlock: %v", err)
+	}
+	select {
+	case err := <-got:
+		if err != nil {
+			t.Fatalf("WaitRepository: %v", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("WaitRepository did not return after the holder unlocked")
+	}
+}
+
+func TestWaitRepository_DoesNotCallOnWaitWhenFree(t *testing.T) {
+	dir := t.TempDir()
+
+	l, err := WaitRepository(context.Background(), dir, "nas", func() { t.Error("onWait called for a free repository") })
+	if err != nil {
+		t.Fatalf("WaitRepository: %v", err)
+	}
+	defer l.Unlock()
+}
+
+func TestWaitRepository_CancelledReturnsCause(t *testing.T) {
+	shortenWait(t)
+	dir := t.TempDir()
+
+	held, ok, err := AcquireRepository(dir, "nas")
+	if err != nil || !ok {
+		t.Fatalf("setup acquire: ok=%v err=%v", ok, err)
+	}
+	defer held.Unlock()
+
+	cause := errors.New("interrupted by SIGTERM")
+	ctx, cancel := context.WithCancelCause(context.Background())
+	time.AfterFunc(20*time.Millisecond, func() { cancel(cause) })
+
+	if _, err := WaitRepository(ctx, dir, "nas", nil); !errors.Is(err, cause) {
+		t.Fatalf("got error %v, want the context's cause %v", err, cause)
+	}
+}
+
+func TestWaitSlot_ReturnsOnceASlotFrees(t *testing.T) {
+	shortenWait(t)
+	dir := t.TempDir()
+
+	held, ok, err := AcquireSlot(dir, 1)
+	if err != nil || !ok {
+		t.Fatalf("setup acquire: ok=%v err=%v", ok, err)
+	}
+	time.AfterFunc(30*time.Millisecond, func() { _ = held.Unlock() })
+
+	l, err := WaitSlot(context.Background(), dir, 1, nil)
+	if err != nil {
+		t.Fatalf("WaitSlot: %v", err)
+	}
+	defer l.Unlock()
+}
+
+func TestWaitSlot_CancelledReturnsCause(t *testing.T) {
+	shortenWait(t)
+	dir := t.TempDir()
+
+	held, ok, err := AcquireSlot(dir, 1)
+	if err != nil || !ok {
+		t.Fatalf("setup acquire: ok=%v err=%v", ok, err)
+	}
+	defer held.Unlock()
+
+	cause := errors.New("interrupted by SIGINT")
+	ctx, cancel := context.WithCancelCause(context.Background())
+	time.AfterFunc(20*time.Millisecond, func() { cancel(cause) })
+
+	if _, err := WaitSlot(ctx, dir, 1, nil); !errors.Is(err, cause) {
+		t.Fatalf("got error %v, want the context's cause %v", err, cause)
+	}
 }

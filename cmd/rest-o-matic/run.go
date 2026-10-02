@@ -31,8 +31,11 @@ var runCmd = &cobra.Command{
 		work, cleanup, stop := interruptContexts()
 		defer stop()
 
-		result, report := executeWithSlot(work, cleanup, cfg, store, jobName, opts)
-		if !report {
+		result, kind := executeWithSlot(work, cleanup, cfg, store, jobName, opts, nil)
+		switch kind {
+		case jobAlreadyRunning:
+			return fmt.Errorf("job %q is already running", jobName)
+		case jobNotStarted:
 			return fmt.Errorf("job %q not started: %v", jobName, context.Cause(work))
 		}
 		printResult(result)
