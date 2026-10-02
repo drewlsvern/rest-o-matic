@@ -24,7 +24,8 @@ Some tests need tools on your `PATH` and skip without them:
 | `podman`, able to run `podman unshare` | The `read_as: podman-unshare` tests |
 | `age` | One test that opens a locked value with the stock tool |
 
-CI installs restic and Podman, and fails if `podman unshare` can't run, so
+CI runs on every pull request into `main` and again on every merge, which
+is what the badge in the README reports. It installs restic and Podman, and fails if `podman unshare` can't run, so
 those tests are never silently skipped there. The Unix-only tests are
 excluded on Windows by build tags.
 
