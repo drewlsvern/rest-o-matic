@@ -9,11 +9,14 @@ import (
 
 	"github.com/drewlsvern/rest-o-matic/internal/color"
 	"github.com/drewlsvern/rest-o-matic/internal/config"
+	"github.com/drewlsvern/rest-o-matic/internal/execution"
+	"github.com/drewlsvern/rest-o-matic/internal/secrets"
 )
 
 var (
 	configPath string
 	stateDir   string
+	keyFile    string
 	colorMode  string
 )
 
@@ -49,8 +52,25 @@ func init() {
 
 	rootCmd.PersistentFlags().StringVar(&configPath, "config", "rest-o-matic.yaml", "path to the config file")
 	rootCmd.PersistentFlags().StringVar(&stateDir, "state-dir", ".rest-o-matic", "directory for state and lock files")
+	rootCmd.PersistentFlags().StringVar(&keyFile, "key-file", "", "host key for locked config values (default: host.key in your user config directory)")
 	rootCmd.PersistentFlags().StringVar(&colorMode, "color", "auto", "colour status output: auto, always, or never")
-	rootCmd.AddCommand(validateCmd, runCmd, tickCmd, statusCmd, execCmd)
+	rootCmd.AddCommand(validateCmd, runCmd, tickCmd, statusCmd, execCmd, secretCmd)
+}
+
+// keyPath is where the host key is: --key-file, or the default location.
+func keyPath() (string, error) {
+	if keyFile != "" {
+		return keyFile, nil
+	}
+	return secrets.DefaultKeyPath()
+}
+
+// newResticRunner returns a runner that can unlock locked credentials with
+// the host key. The key is only looked for if a locked value is met.
+func newResticRunner() *execution.ResticRunner {
+	runner := execution.NewResticRunner()
+	runner.Secrets = secrets.NewUnlocker(keyPath())
+	return runner
 }
 
 func statePath() string { return filepath.Join(stateDir, "state.json") }

@@ -7,6 +7,8 @@ import (
 	"sort"
 
 	"gopkg.in/yaml.v3"
+
+	"github.com/drewlsvern/rest-o-matic/internal/secrets"
 )
 
 // Config is the top-level rest-o-matic configuration file.
@@ -38,13 +40,42 @@ type Repository struct {
 	Backend string `yaml:"backend"`
 	URL     string `yaml:"url"`
 
-	Password        string `yaml:"password,omitempty"`
+	// Password may be locked (see Secret); PasswordFile and
+	// PasswordCommand point at a secret without containing one.
+	Password        Secret `yaml:"password,omitempty"`
 	PasswordFile    string `yaml:"password_file,omitempty"`
 	PasswordCommand string `yaml:"password_command,omitempty"`
 
 	// Env carries arbitrary backend-specific credentials (e.g.
 	// AWS_ACCESS_KEY_ID for an s3 backend) through to the restic process.
-	Env map[string]string `yaml:"env,omitempty"`
+	// Any of its values may be locked.
+	Env map[string]Secret `yaml:"env,omitempty"`
+}
+
+// Secret is a credential in the config: either plain text, or a locked
+// value (written `!locked "..."`) that only the host's key can open. Being
+// its own type means the text can't be handed to restic without someone
+// deciding what to do about Locked.
+type Secret struct {
+	// Value is the plain text, or the locked form when Locked is set.
+	Value  string
+	Locked bool
+}
+
+// Plain returns a Secret holding plain text.
+func Plain(value string) Secret { return Secret{Value: value} }
+
+// IsZero reports whether no value was given at all.
+func (s Secret) IsZero() bool { return s.Value == "" && !s.Locked }
+
+// UnmarshalYAML accepts a scalar, noting whether it carries the locked tag.
+func (s *Secret) UnmarshalYAML(value *yaml.Node) error {
+	if value.Kind != yaml.ScalarNode {
+		return fmt.Errorf("line %d: expected a single value", value.Line)
+	}
+	s.Value = value.Value
+	s.Locked = value.Tag == secrets.Tag
+	return nil
 }
 
 // Source declares what a job backs up. In this version only a `paths`

@@ -109,7 +109,7 @@ func TestRunJob_IndependentPerRepositoryBackup(t *testing.T) {
 	requireRestic(t)
 	goodRepo := initRepo(t)
 	// An uninitialized repository path: restic backup against it will fail.
-	badRepo := config.Repository{Backend: "local", URL: filepath.Join(t.TempDir(), "never-initialized"), Password: "x"}
+	badRepo := config.Repository{Backend: "local", URL: filepath.Join(t.TempDir(), "never-initialized"), Password: config.Plain("x")}
 	srcDir := t.TempDir()
 
 	job := config.Job{

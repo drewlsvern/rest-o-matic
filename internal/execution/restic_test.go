@@ -29,14 +29,24 @@ func initRepo(t *testing.T) config.Repository {
 	repo := config.Repository{
 		Backend:  "local",
 		URL:      filepath.Join(dir, "repo"),
-		Password: "test-password",
+		Password: config.Plain("test-password"),
 	}
 	cmd := exec.Command("restic", "-r", repo.URL, "init")
-	cmd.Env = repoEnv(repo)
+	cmd.Env = testEnv(t, repo)
 	if out, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("restic init failed: %v: %s", err, out)
 	}
 	return repo
+}
+
+// testEnv is restic's environment for a repository with plain credentials.
+func testEnv(t *testing.T, repo config.Repository) []string {
+	t.Helper()
+	env, err := NewResticRunner().repoEnv(repo)
+	if err != nil {
+		t.Fatalf("repoEnv: %v", err)
+	}
+	return env
 }
 
 type resticSnapshot struct {
@@ -48,7 +58,7 @@ func listSnapshots(t *testing.T, repo config.Repository, tagFilterArgs ...string
 	t.Helper()
 	args := append([]string{"-r", repo.URL, "snapshots", "--json"}, tagFilterArgs...)
 	cmd := exec.Command("restic", args...)
-	cmd.Env = repoEnv(repo)
+	cmd.Env = testEnv(t, repo)
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		t.Fatalf("restic snapshots failed: %v: %s", err, out)
@@ -154,8 +164,8 @@ wait
 	if err := os.WriteFile(fake, []byte(script), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	repo := config.Repository{Backend: "local", URL: filepath.Join(dir, "repo"), Password: "x",
-		Env: map[string]string{"MARKER": marker, "STARTED": started}}
+	repo := config.Repository{Backend: "local", URL: filepath.Join(dir, "repo"), Password: config.Plain("x"),
+		Env: map[string]config.Secret{"MARKER": config.Plain(marker), "STARTED": config.Plain(started)}}
 
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan error, 1)

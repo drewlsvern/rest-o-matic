@@ -3,7 +3,10 @@ package config
 import (
 	"fmt"
 	"path/filepath"
+	"sort"
 	"strings"
+
+	"github.com/drewlsvern/rest-o-matic/internal/secrets"
 )
 
 // remoteSchemes are the restic backends addressed with a "<scheme>:" url
@@ -36,6 +39,22 @@ func urlScheme(url string) string {
 func CheckRepository(name string, repo Repository) (errs []error, warns []Warning) {
 	fail := func(format string, args ...any) {
 		errs = append(errs, ValidationError{Repository: name, Message: fmt.Sprintf(format, args...)})
+	}
+
+	// A locked value is only checked for its form. No key is read, so the
+	// result is the same on every machine.
+	if repo.Password.Locked && secrets.WellFormed(repo.Password.Value) != nil {
+		fail("password is marked %s but is not a valid locked value; create one with `rest-o-matic secret lock`", secrets.Tag)
+	}
+	envNames := make([]string, 0, len(repo.Env))
+	for envName := range repo.Env {
+		envNames = append(envNames, envName)
+	}
+	sort.Strings(envNames)
+	for _, envName := range envNames {
+		if v := repo.Env[envName]; v.Locked && secrets.WellFormed(v.Value) != nil {
+			fail("env %s is marked %s but is not a valid locked value; create one with `rest-o-matic secret lock`", envName, secrets.Tag)
+		}
 	}
 	warn := func(format string, args ...any) {
 		warns = append(warns, Warning{Repository: name, Message: fmt.Sprintf(format, args...)})

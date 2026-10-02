@@ -176,7 +176,7 @@ func TestRunJob_HookEnvironment(t *testing.T) {
 	requireRestic(t)
 	dir := t.TempDir()
 	envOut := filepath.Join(dir, "env")
-	bad := config.Repository{Backend: "local", URL: filepath.Join(dir, "never-initialized"), Password: "x"}
+	bad := config.Repository{Backend: "local", URL: filepath.Join(dir, "never-initialized"), Password: config.Plain("x")}
 	cfg := hookJob(t, config.Hooks{
 		Before: []string{`echo "before=$RESTOMATIC_JOB" >> ` + envOut},
 		After: config.AfterHooks{Failure: []string{

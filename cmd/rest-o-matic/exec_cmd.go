@@ -72,7 +72,7 @@ restic directly if you really want to bypass this.`,
 			os.Exit(1)
 		}
 
-		opts := execution.Options{Restic: execution.NewResticRunner(), LockDir: lockDir()}
+		opts := execution.Options{Restic: newResticRunner(), LockDir: lockDir()}
 		result, err := execution.Exec(context.Background(), cfg, repoName, resticArgs, execForce, opts)
 		if err != nil {
 			return err

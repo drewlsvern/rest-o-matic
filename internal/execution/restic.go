@@ -6,6 +6,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -13,12 +14,15 @@ import (
 	"time"
 
 	"github.com/drewlsvern/rest-o-matic/internal/config"
+	"github.com/drewlsvern/rest-o-matic/internal/secrets"
 )
 
 // ResticRunner invokes the restic binary. Path defaults to "restic" (looked
-// up on PATH); override it in tests.
+// up on PATH); override it in tests. Secrets opens a repository's locked
+// credentials; without it a repository that has any can't be used.
 type ResticRunner struct {
-	Path string
+	Path    string
+	Secrets *secrets.Unlocker
 }
 
 // NewResticRunner returns a runner that invokes "restic" from PATH.
@@ -53,11 +57,16 @@ func configureResticCancel(cmd *exec.Cmd) {
 
 // repoEnv builds the environment restic needs to reach a repository:
 // the caller's own environment plus password/credential fields translated
-// to the env vars restic expects.
-func repoEnv(repo config.Repository) []string {
+// to the env vars restic expects. Locked values are unlocked here, in
+// memory, for this one repository and only as restic is about to start.
+func (r *ResticRunner) repoEnv(repo config.Repository) ([]string, error) {
 	env := os.Environ()
-	if repo.Password != "" {
-		env = append(env, "RESTIC_PASSWORD="+repo.Password)
+	if !repo.Password.IsZero() {
+		password, err := r.reveal("password", repo.Password)
+		if err != nil {
+			return nil, err
+		}
+		env = append(env, "RESTIC_PASSWORD="+password)
 	}
 	if repo.PasswordFile != "" {
 		env = append(env, "RESTIC_PASSWORD_FILE="+repo.PasswordFile)
@@ -66,9 +75,35 @@ func repoEnv(repo config.Repository) []string {
 		env = append(env, "RESTIC_PASSWORD_COMMAND="+repo.PasswordCommand)
 	}
 	for k, v := range repo.Env {
-		env = append(env, k+"="+v)
+		value, err := r.reveal("env "+k, v)
+		if err != nil {
+			return nil, err
+		}
+		env = append(env, k+"="+value)
 	}
-	return env
+	return env, nil
+}
+
+// reveal returns a credential's plain text, unlocking it if need be. The
+// error says which field couldn't be unlocked and why, and never includes
+// any of the locked text.
+func (r *ResticRunner) reveal(field string, s config.Secret) (string, error) {
+	if !s.Locked {
+		return s.Value, nil
+	}
+	if r.Secrets == nil {
+		return "", fmt.Errorf("%s is locked, and no host key is configured", field)
+	}
+	value, err := r.Secrets.Reveal(s.Value)
+	switch {
+	case errors.Is(err, secrets.ErrNoHostKey):
+		return "", fmt.Errorf("%s is locked, and this host has no key to unlock it: %w", field, err)
+	case errors.Is(err, secrets.ErrNotForThisKey):
+		return "", fmt.Errorf("%s is locked, but was %w", field, err)
+	case err != nil:
+		return "", fmt.Errorf("%s is locked and could not be unlocked: %w", field, err)
+	}
+	return value, nil
 }
 
 // resticMessage is the subset of restic's --json output lines this package
@@ -109,8 +144,12 @@ func (r *ResticRunner) Backup(ctx context.Context, repo config.Repository, paths
 	}
 	args = append(args, "--json")
 
+	env, err := r.repoEnv(repo)
+	if err != nil {
+		return "", err
+	}
 	cmd := exec.CommandContext(ctx, r.binary(), args...)
-	cmd.Env = repoEnv(repo)
+	cmd.Env = env
 	configureResticCancel(cmd)
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
@@ -156,8 +195,12 @@ func (r *ResticRunner) Forget(ctx context.Context, repo config.Repository, jobTa
 	}
 	args = append(args, "--prune")
 
+	env, err := r.repoEnv(repo)
+	if err != nil {
+		return err
+	}
 	cmd := exec.CommandContext(ctx, r.binary(), args...)
-	cmd.Env = repoEnv(repo)
+	cmd.Env = env
 	configureResticCancel(cmd)
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
