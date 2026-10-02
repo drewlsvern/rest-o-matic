@@ -232,3 +232,69 @@ func TestCLI_Exec_WarningsPrintedThenResticRuns(t *testing.T) {
 		t.Fatalf("expected a prefixed config warning on stderr, got: %s", stderr)
 	}
 }
+
+// --- exec --job (spec: Job-Scoped Exec) ---
+
+func TestCLI_Exec_JobUnknownIsRefused(t *testing.T) {
+	requireRestic(t)
+	bin := buildBinary(t)
+	workdir, configPath, _ := setupExecWorkspace(t, "")
+
+	_, stderr, code := runCLI(t, bin, workdir, "--config", configPath, "exec", "nas", "--job", "nope", "--", "snapshots")
+	if code != 1 || !contains(stderr, `job "nope" is not defined`) {
+		t.Fatalf("expected exit 1 and an undefined-job message, got %d: %s", code, stderr)
+	}
+}
+
+func TestCLI_Exec_JobNotUsingRepositoryIsRefused(t *testing.T) {
+	requireRestic(t)
+	bin := buildBinary(t)
+	// "elsewhere" points at a repository that isn't defined; that config
+	// error must not block exec, but the job still doesn't use nas.
+	extra := `
+  elsewhere:
+    source:
+      paths: ["/x"]
+    policy: hot
+    repositories: [offsite]
+`
+	workdir, configPath, _ := setupExecWorkspace(t, extra)
+
+	_, stderr, code := runCLI(t, bin, workdir, "--config", configPath, "exec", "nas", "--job", "elsewhere", "--", "snapshots")
+	if code != 1 || !contains(stderr, `job "elsewhere" does not back up to repository "nas"`) {
+		t.Fatalf("expected exit 1 naming the job and repository, got %d: %s", code, stderr)
+	}
+}
+
+func TestCLI_Exec_DirectJobMatchesPlainExec(t *testing.T) {
+	requireRestic(t)
+	bin := buildBinary(t)
+	workdir, configPath, _ := setupExecWorkspace(t, "")
+
+	plain, _, code := runCLI(t, bin, workdir, "--config", configPath, "exec", "nas", "--", "snapshots", "--json")
+	if code != 0 {
+		t.Fatalf("plain exec failed with %d", code)
+	}
+	withJob, stderr, code := runCLI(t, bin, workdir, "--config", configPath, "exec", "nas", "--job", "documents", "--", "snapshots", "--json")
+	if code != 0 || withJob != plain {
+		t.Fatalf("expected identical output for a direct job, got %d:\n%s\nvs\n%s\n%s", code, withJob, plain, stderr)
+	}
+}
+
+func TestCLI_Exec_JobDoesNotSatisfyTheGate(t *testing.T) {
+	requireRestic(t)
+	bin := buildBinary(t)
+	extra := `
+  postgres:
+    source:
+      paths: ["` + filepath.Join(t.TempDir(), "src2") + `"]
+    policy: hot
+    repositories: [nas]
+`
+	workdir, configPath, _ := setupExecWorkspace(t, extra)
+
+	_, stderr, code := runCLI(t, bin, workdir, "--config", configPath, "exec", "nas", "--job", "documents", "--", "forget", "--keep-daily", "7")
+	if code != execution.ExitGateBlocked {
+		t.Fatalf("expected exit code %d, got %d (stderr: %s)", execution.ExitGateBlocked, code, stderr)
+	}
+}

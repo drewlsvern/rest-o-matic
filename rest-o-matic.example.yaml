@@ -175,3 +175,27 @@
 #     # jobs share one repository (as `nas` does here, between `documents`
 #     # and `postgres`).
 #     tags: [prod]
+#
+#   # A rootless Podman container's data, backed up through its bind mount.
+#   # Run rest-o-matic as the user that runs the containers.
+#   gitea:
+#     source:
+#       paths: ["/home/me/containers/gitea"]
+#
+#     # How restic reads the source files. One of:
+#     #   direct          - (default) as the user rest-o-matic runs as
+#     #   podman-unshare  - inside that user's rootless Podman namespace
+#     #                     (`podman unshare`), where files written by
+#     #                     rootless containers are readable whatever their
+#     #                     --userns setting. Linux only. Restore with
+#     #                     `rest-o-matic exec <repo> --job gitea -- restore …`
+#     #                     so files get their original owners back.
+#     read_as: podman-unshare
+#
+#     hooks:
+#       before: ["systemctl --user stop gitea.service"]
+#       after:
+#         always: ["systemctl --user start gitea.service"]
+#
+#     policy: cold
+#     repositories: [nas]

@@ -116,7 +116,7 @@ func execTestConfig() *config.Config {
 
 func TestExec_UndefinedRepositoryErrors(t *testing.T) {
 	cfg := execTestConfig()
-	_, err := Exec(context.Background(), cfg, "does-not-exist", []string{"snapshots"}, false, Options{Restic: NewResticRunner(), LockDir: t.TempDir()})
+	_, err := Exec(context.Background(), cfg, "does-not-exist", config.ReadDirect, []string{"snapshots"}, false, Options{Restic: NewResticRunner(), LockDir: t.TempDir()})
 	if err == nil {
 		t.Fatal("expected an error for an undefined repository")
 	}
@@ -124,7 +124,7 @@ func TestExec_UndefinedRepositoryErrors(t *testing.T) {
 
 func TestExec_GateBlocksBeforeAnyLockOrResticInvocation(t *testing.T) {
 	cfg := execTestConfig()
-	result, err := Exec(context.Background(), cfg, "nas", []string{"forget", "--prune"}, false, Options{Restic: NewResticRunner(), LockDir: t.TempDir()})
+	result, err := Exec(context.Background(), cfg, "nas", config.ReadDirect, []string{"forget", "--prune"}, false, Options{Restic: NewResticRunner(), LockDir: t.TempDir()})
 	if err != nil {
 		t.Fatalf("Exec: %v", err)
 	}
@@ -141,7 +141,7 @@ func TestExec_GateBlocksBeforeAnyLockOrResticInvocation(t *testing.T) {
 
 func TestExec_ForceDoesNotBypassGate(t *testing.T) {
 	cfg := execTestConfig()
-	result, err := Exec(context.Background(), cfg, "nas", []string{"forget", "--prune"}, true /* force */, Options{Restic: NewResticRunner(), LockDir: t.TempDir()})
+	result, err := Exec(context.Background(), cfg, "nas", config.ReadDirect, []string{"forget", "--prune"}, true /* force */, Options{Restic: NewResticRunner(), LockDir: t.TempDir()})
 	if err != nil {
 		t.Fatalf("Exec: %v", err)
 	}
@@ -160,7 +160,7 @@ func TestExec_LockHeldByAnotherExecutionBlocksAGuardedCommand(t *testing.T) {
 	}
 	defer held.Unlock()
 
-	result, err := Exec(context.Background(), cfg, "nas", []string{"prune"}, false, Options{Restic: NewResticRunner(), LockDir: lockDir})
+	result, err := Exec(context.Background(), cfg, "nas", config.ReadDirect, []string{"prune"}, false, Options{Restic: NewResticRunner(), LockDir: lockDir})
 	if err != nil {
 		t.Fatalf("Exec: %v", err)
 	}
@@ -193,7 +193,7 @@ func TestExec_ForceSkipsTheLockAndInvokesRestic(t *testing.T) {
 	// "prune" would normally require the exclusive lock and be deferred;
 	// force should skip that guard and let restic run directly (it
 	// succeeds harmlessly against a freshly-initialized, empty repo).
-	result, err := Exec(context.Background(), cfg, "nas", []string{"prune"}, true, Options{Restic: NewResticRunner(), LockDir: lockDir})
+	result, err := Exec(context.Background(), cfg, "nas", config.ReadDirect, []string{"prune"}, true, Options{Restic: NewResticRunner(), LockDir: lockDir})
 	if err != nil {
 		t.Fatalf("Exec: %v", err)
 	}
@@ -226,7 +226,7 @@ func TestExec_LockingSubcommandRefusedWhenStateDirOwnedByAnotherUser(t *testing.
 	// a clean refusal also proves restic was never invoked.
 	opts := Options{Restic: &ResticRunner{Path: filepath.Join(stateDir, "no-restic")}, LockDir: lockDir, StateDir: stateDir}
 
-	result, err := Exec(context.Background(), execTestConfig(), "nas", []string{"prune"}, false, opts)
+	result, err := Exec(context.Background(), execTestConfig(), "nas", config.ReadDirect, []string{"prune"}, false, opts)
 	if err != nil {
 		t.Fatalf("Exec: %v", err)
 	}
@@ -254,7 +254,7 @@ func TestExec_SharedLockSubcommandAndForceSkipTheStateDirCheck(t *testing.T) {
 
 			// restic can't start here, so an error is expected; what
 			// matters is that the ownership check never ran.
-			result, _ := Exec(context.Background(), execTestConfig(), "nas", tc.args, tc.force, opts)
+			result, _ := Exec(context.Background(), execTestConfig(), "nas", config.ReadDirect, tc.args, tc.force, opts)
 			if *called || result.Blocked == BlockedByStateDir {
 				t.Fatalf("expected the ownership check to be skipped, got called=%v %+v", *called, result)
 			}
