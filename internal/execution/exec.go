@@ -1,15 +1,19 @@
 package execution
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
 	"os/exec"
+	"slices"
 	"strings"
 
 	"github.com/drewlsvern/rest-o-matic/internal/config"
 	"github.com/drewlsvern/rest-o-matic/internal/lock"
+	"github.com/drewlsvern/rest-o-matic/internal/statedir"
 )
 
 // Reserved exit codes for when exec refuses to invoke restic at all. Chosen
@@ -19,8 +23,10 @@ import (
 // not be read). Whenever restic is actually invoked, its own exit code is
 // propagated untouched instead of either of these - see PassThrough.
 const (
-	ExitLockBlocked = 20
-	ExitGateBlocked = 21
+	ExitLockBlocked     = 20
+	ExitGateBlocked     = 21
+	ExitStateDirBlocked = 22
+	ExitReadModeBlocked = 23
 )
 
 // sharedLockSubcommands lists restic subcommands understood to take only a
@@ -43,6 +49,10 @@ var sharedLockSubcommands = map[string]struct{}{
 	"mount":     {},
 	"restore":   {},
 }
+
+// checkStateDir is statedir.Check; a variable so tests can fake another
+// owner without running as root.
+var checkStateDir = statedir.Check
 
 func requiresExclusiveLock(subcommand string) bool {
 	_, shared := sharedLockSubcommands[subcommand]
@@ -96,6 +106,130 @@ func gateBlocked(subcommand string, args []string, sharingJobs []string) bool {
 	}
 }
 
+// readModeTag is the tag a snapshot taken in a non-direct read mode
+// carries (see RunJob).
+func readModeTag(mode string) string { return "restomatic-read=" + mode }
+
+// restoreValueFlags lists restic flags that take a separate value -
+// restore's own and restic's global ones - so restoreSnapshotArg can skip
+// the value instead of mistaking it for the snapshot. A flag missing from
+// this list makes its value look like a second positional argument, which
+// restoreSnapshotArg reports as ambiguous: the check fails closed.
+var restoreValueFlags = map[string]bool{
+	"-t": true, "--target": true,
+	"-i": true, "--include": true, "--iinclude": true, "--include-file": true, "--iinclude-file": true,
+	"-e": true, "--exclude": true, "--iexclude": true, "--exclude-file": true, "--iexclude-file": true,
+	"-H": true, "--host": true, "--path": true, "--tag": true, "--overwrite": true,
+	"-r": true, "--repo": true, "--repository-file": true,
+	"-p": true, "--password-file": true, "--password-command": true, "--key-hint": true,
+	"-o": true, "--option": true, "--cache-dir": true, "--cacert": true, "--tls-client-cert": true,
+	"--compression": true, "--pack-size": true, "--limit-download": true, "--limit-upload": true,
+	"--retry-lock": true, "--stuck-request-timeout": true, "--http-user-agent": true,
+}
+
+// restoreSnapshotArg returns the snapshot a restore invocation (args[0] ==
+// "restore") uses, without any ":subfolder" suffix. ok is false unless
+// there is exactly one positional argument.
+func restoreSnapshotArg(args []string) (snapshot string, ok bool) {
+	var positional []string
+	for i := 1; i < len(args); i++ {
+		a := args[i]
+		if a == "--" {
+			positional = append(positional, args[i+1:]...)
+			break
+		}
+		if strings.HasPrefix(a, "-") {
+			if !strings.Contains(a, "=") && restoreValueFlags[a] {
+				i++
+			}
+			continue
+		}
+		positional = append(positional, a)
+	}
+	if len(positional) != 1 {
+		return "", false
+	}
+	snapshot, _, _ = strings.Cut(positional[0], ":")
+	return snapshot, true
+}
+
+// tagFilters returns the value of every --tag flag in args, in order.
+func tagFilters(args []string) []string {
+	var filters []string
+	for i := 0; i < len(args); i++ {
+		if v, ok := strings.CutPrefix(args[i], "--tag="); ok {
+			filters = append(filters, v)
+		} else if args[i] == "--tag" && i+1 < len(args) {
+			filters = append(filters, args[i+1])
+			i++
+		}
+	}
+	return filters
+}
+
+// restoreReadModeCheck returns why restoring in mode must be refused, or ""
+// if the snapshot was taken in that mode. Restoring a snapshot in another
+// mode than it was taken in gives restored files, and the existing parent
+// directories restic restores metadata for, the wrong owners.
+func restoreReadModeCheck(ctx context.Context, r *ResticRunner, repo config.Repository, mode string, args []string) (string, error) {
+	want := readModeTag(mode)
+	snapshot, ok := restoreSnapshotArg(args)
+	if !ok {
+		return `cannot tell which snapshot this restore uses; with --job, give the snapshot ID (or "latest") as the only argument after "restore"`, nil
+	}
+
+	if snapshot == "latest" {
+		filters := tagFilters(args)
+		for _, f := range filters {
+			if !slices.Contains(strings.Split(f, ","), want) {
+				return fmt.Sprintf("restore latest with --job for a read_as: %s job must only match snapshots taken that way; add %s to every --tag filter, e.g. --tag %s,%s", mode, want, f, want), nil
+			}
+		}
+		if len(filters) == 0 {
+			return fmt.Sprintf("restore latest with --job for a read_as: %s job must only match snapshots taken that way; add --tag %s", mode, want), nil
+		}
+		return "", nil
+	}
+
+	tags, err := r.SnapshotTags(ctx, repo, snapshot)
+	if err != nil {
+		return fmt.Sprintf("could not check how snapshot %s was taken: %v", snapshot, err), nil
+	}
+	if slices.Contains(tags, want) {
+		return "", nil
+	}
+	for _, t := range tags {
+		if other, ok := strings.CutPrefix(t, "restomatic-read="); ok {
+			return fmt.Sprintf("snapshot %s was taken with read_as: %s, not %s; restore it through a job using read_as: %s", snapshot, other, mode, other), nil
+		}
+	}
+	return fmt.Sprintf("snapshot %s was taken with read_as: %s (it has no %s tag); restore it without --job", snapshot, config.ReadDirect, want), nil
+}
+
+// SnapshotTags returns the tags of one snapshot, looked up directly (never
+// in a wrapped read mode) with `restic snapshots --json <id>`, which only
+// reads the repository.
+func (r *ResticRunner) SnapshotTags(ctx context.Context, repo config.Repository, id string) ([]string, error) {
+	cmd := exec.CommandContext(ctx, r.binary(), "-r", repo.URL, "snapshots", "--json", id)
+	cmd.Env = repoEnv(repo)
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+	out, err := cmd.Output()
+	if err != nil {
+		return nil, fmt.Errorf("%w: %s", err, strings.TrimSpace(stderr.String()))
+	}
+	var snaps []struct {
+		Tags []string `json:"tags"`
+	}
+	if err := json.Unmarshal(out, &snaps); err != nil {
+		return nil, fmt.Errorf("parsing restic snapshots output: %w", err)
+	}
+	if len(snaps) != 1 {
+		return nil, fmt.Errorf("no single snapshot matches %q", id)
+	}
+	return snaps[0].Tags, nil
+}
+
 // BlockReason identifies why exec refused to invoke restic.
 type BlockReason string
 
@@ -108,6 +242,14 @@ const (
 	// BlockedByGate means the tag-safety gate refused the command; no
 	// option bypasses this, the command itself must change.
 	BlockedByGate BlockReason = "gate"
+	// BlockedByStateDir means the state directory (or a file in it) is
+	// owned by another user, so taking the lock would create files that
+	// lock that user out; see internal/statedir.
+	BlockedByStateDir BlockReason = "state-dir"
+	// BlockedByReadMode means a restore through `exec --job` would use a
+	// snapshot not taken in that job's read mode, giving files (and their
+	// existing parent directories) the wrong owners.
+	BlockedByReadMode BlockReason = "read-mode"
 )
 
 // ExecResult describes the outcome of an exec invocation.
@@ -116,17 +258,24 @@ type ExecResult struct {
 	Blocked    BlockReason
 	// SharingJobs is populated only when Blocked == BlockedByGate.
 	SharingJobs []string
+	// StateDirErr is populated only when Blocked == BlockedByStateDir.
+	StateDirErr *statedir.OwnerError
+	// ReadModeMsg explains the refusal when Blocked == BlockedByReadMode.
+	ReadModeMsg string
 	// ExitCode is restic's own exit code when restic was actually
 	// invoked (Blocked == NotBlocked), or one of the reserved
-	// ExitLockBlocked/ExitGateBlocked constants otherwise.
+	// ExitLockBlocked/ExitGateBlocked/ExitStateDirBlocked/
+	// ExitReadModeBlocked constants otherwise.
 	ExitCode int
 }
 
 // Exec runs a restic subcommand against a configured repository: resolving
 // its connection info, applying the lock-type-based concurrency guard
 // (skippable with force) and the tag-safety gate (never skippable), then
-// passing the remaining args through to restic transparently.
-func Exec(ctx context.Context, cfg *config.Config, repoName string, args []string, force bool, opts Options) (ExecResult, error) {
+// passing the remaining args through to restic transparently. mode is the
+// read mode restic runs in (see config.Job.ReadAs): config.ReadDirect, or
+// the mode of the job named by `exec --job`.
+func Exec(ctx context.Context, cfg *config.Config, repoName, mode string, args []string, force bool, opts Options) (ExecResult, error) {
 	repo, ok := cfg.Repositories[repoName]
 	if !ok {
 		return ExecResult{}, fmt.Errorf("no such repository %q", repoName)
@@ -147,7 +296,28 @@ func Exec(ctx context.Context, cfg *config.Config, repoName string, args []strin
 		}, nil
 	}
 
+	if subcommand == "restore" && mode != "" && mode != config.ReadDirect {
+		msg, err := restoreReadModeCheck(ctx, opts.Restic, repo, mode, args)
+		if err != nil {
+			return ExecResult{}, err
+		}
+		if msg != "" {
+			return ExecResult{Repository: repoName, Blocked: BlockedByReadMode, ReadModeMsg: msg, ExitCode: ExitReadModeBlocked}, nil
+		}
+	}
+
 	if !force && requiresExclusiveLock(subcommand) {
+		// Only this path creates files in the state directory, so only
+		// this path needs the ownership check.
+		if opts.StateDir != "" {
+			if err := checkStateDir(opts.StateDir); err != nil {
+				var oe *statedir.OwnerError
+				if !errors.As(err, &oe) {
+					return ExecResult{}, err
+				}
+				return ExecResult{Repository: repoName, Blocked: BlockedByStateDir, StateDirErr: oe, ExitCode: ExitStateDirBlocked}, nil
+			}
+		}
 		l, acquired, err := lock.AcquireRepository(opts.LockDir, repoName)
 		if err != nil {
 			return ExecResult{}, fmt.Errorf("acquiring lock for repository %q: %w", repoName, err)
@@ -158,7 +328,7 @@ func Exec(ctx context.Context, cfg *config.Config, repoName string, args []strin
 		defer l.Unlock()
 	}
 
-	exitCode, err := opts.Restic.PassThrough(ctx, repo, args)
+	exitCode, err := opts.Restic.PassThrough(ctx, repo, mode, args)
 	if err != nil {
 		return ExecResult{}, err
 	}
@@ -172,10 +342,17 @@ func Exec(ctx context.Context, cfg *config.Config, repoName string, args []strin
 // are long-running/interactive). It returns restic's own exit code when
 // restic actually runs, even on failure; the returned error is non-nil only
 // when restic could not be started at all.
-func (r *ResticRunner) PassThrough(ctx context.Context, repo config.Repository, args []string) (exitCode int, err error) {
+//
+// Unlike a wrapped backup, a wrapped passthrough stays in the caller's
+// process group: it runs in the foreground of a terminal, where Ctrl-C
+// already reaches every process in that group, restic included.
+func (r *ResticRunner) PassThrough(ctx context.Context, repo config.Repository, mode string, args []string) (exitCode int, err error) {
 	fullArgs := append([]string{"-r", repo.URL}, args...)
 
-	cmd := exec.CommandContext(ctx, r.binary(), fullArgs...)
+	cmd, err := r.command(ctx, mode, fullArgs)
+	if err != nil {
+		return -1, err
+	}
 	cmd.Env = repoEnv(repo)
 	cmd.Stdin = os.Stdin
 	cmd.Stdout = os.Stdout

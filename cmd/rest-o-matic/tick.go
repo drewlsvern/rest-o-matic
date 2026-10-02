@@ -15,6 +15,7 @@ import (
 	"github.com/drewlsvern/rest-o-matic/internal/execution"
 	"github.com/drewlsvern/rest-o-matic/internal/schedule"
 	"github.com/drewlsvern/rest-o-matic/internal/state"
+	"github.com/drewlsvern/rest-o-matic/internal/statedir"
 )
 
 var tickCmd = &cobra.Command{
@@ -28,6 +29,9 @@ once they've all finished.`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		cfg, err := loadAndValidate()
 		if err != nil {
+			return err
+		}
+		if err := statedir.Check(stateDir); err != nil {
 			return err
 		}
 
