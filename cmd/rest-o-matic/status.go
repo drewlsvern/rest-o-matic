@@ -105,6 +105,9 @@ type jobStatus struct {
 	Waiting bool           `json:"waiting"`
 	Running *runningStatus `json:"running"`
 	LastRun *runStatus     `json:"last_run"`
+	// FailingSince is when the first of the job's current run of failures
+	// started; null unless its most recent run failed.
+	FailingSince *time.Time `json:"failing_since"`
 	// Runs is the job's history, newest first; present only when a single
 	// job was asked for.
 	Runs []runStatus `json:"runs,omitzero"`
@@ -192,6 +195,13 @@ func buildStatus(cfg *config.Config, st *state.State, now time.Time, only string
 		if len(runs) > 0 {
 			job.LastRun = &runs[0]
 		}
+		if js.LastOutcome == state.OutcomeFailed {
+			// A state from before this was tracked only knows the last run.
+			job.FailingSince = utcPtr(js.FailingSince)
+			if job.FailingSince == nil {
+				job.FailingSince = utcPtr(&js.LastRun)
+			}
+		}
 		if only != "" {
 			job.Runs = runs
 		}
@@ -214,6 +224,9 @@ func runStatuses(js state.JobState) []runStatus {
 			Trigger:      &trigger,
 			Error:        strPtr(r.Error),
 			Repositories: []repoStatus{},
+		}
+		if r.Started.IsZero() {
+			run.Started = nil // unknown, not the year 1
 		}
 		for _, repo := range r.Repositories {
 			run.Repositories = append(run.Repositories, repoStatus{
@@ -275,6 +288,10 @@ func writeStatus(w io.Writer, r statusReport, p color.Painter, loc *time.Locatio
 			notes = append(notes, note)
 		}
 		if run := job.LastRun; run != nil && run.Outcome != state.OutcomeSuccess {
+			// Only worth a line once it has failed more than once in a row.
+			if since := job.FailingSince; since != nil && run.Started != nil && since.Before(*run.Started) {
+				notes = append(notes, "failing since "+ago(now.Sub(*since)))
+			}
 			notes = append(notes, failureNotes(*run)...)
 		}
 		t.add(notes, cell{text: job.Name}, cell{text: job.Schedule}, cell{text: lastRun}, outcome, cell{text: took}, cell{text: nextDue(job, now, loc)})

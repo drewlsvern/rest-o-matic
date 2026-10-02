@@ -74,6 +74,11 @@ type JobState struct {
 	LastOutcome string    `json:"last_outcome,omitempty"`
 
 	Running *Running `json:"running,omitempty"`
+	// FailingSince is when the first run of the current run of failures
+	// started, and FailureNotified when the failure notification was last
+	// sent for it. Both are cleared when the job next succeeds.
+	FailingSince    *time.Time `json:"failing_since,omitempty"`
+	FailureNotified *time.Time `json:"failure_notified,omitempty"`
 	// Runs are the most recent runs, newest first, at most MaxRuns.
 	Runs []RunRecord `json:"runs,omitempty"`
 }
@@ -122,14 +127,27 @@ func (s *Store) Load() (*State, error) {
 	return &st, nil
 }
 
+// Failing is a job's failing state as of a run that failed: since when it
+// has been failing, and when its failure notification was last sent (nil
+// if it hasn't been).
+type Failing struct {
+	Since    *time.Time
+	Notified *time.Time
+}
+
 // RecordRun adds a finished run to the front of the job's history, dropping
-// the oldest beyond MaxRuns, and clears its running marker.
-func (s *Store) RecordRun(jobName string, run RunRecord) error {
+// the oldest beyond MaxRuns, and clears its running marker. failing is
+// recorded with a failed run; a successful run clears it whatever is given.
+func (s *Store) RecordRun(jobName string, run RunRecord, failing Failing) error {
 	return s.update(func(st *State) bool {
 		js := st.Jobs[jobName]
 		js.LastRun = run.Finished
 		js.LastOutcome = run.Outcome
 		js.Running = nil
+		js.FailingSince, js.FailureNotified = failing.Since, failing.Notified
+		if run.Outcome == OutcomeSuccess {
+			js.FailingSince, js.FailureNotified = nil, nil
+		}
 		js.Runs = append([]RunRecord{run}, js.Runs...)
 		if len(js.Runs) > MaxRuns {
 			js.Runs = js.Runs[:MaxRuns]

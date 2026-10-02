@@ -58,7 +58,7 @@ func TestRecordRun_PersistsRecordAndLastRun(t *testing.T) {
 			{Name: "offsite", Result: ResultBackupFailed, Error: "restic backup failed"},
 		},
 	}
-	if err := s.RecordRun("gitea", rec); err != nil {
+	if err := s.RecordRun("gitea", rec, Failing{}); err != nil {
 		t.Fatalf("RecordRun: %v", err)
 	}
 
@@ -84,7 +84,7 @@ func TestRecordRun_HistoryIsNewestFirstAndCapped(t *testing.T) {
 	for i := 0; i < MaxRuns+3; i++ {
 		rec := run(base.Add(time.Duration(i)*time.Hour), OutcomeSuccess)
 		rec.Error = strconv.Itoa(i)
-		if err := s.RecordRun("postgres", rec); err != nil {
+		if err := s.RecordRun("postgres", rec, Failing{}); err != nil {
 			t.Fatalf("RecordRun %d: %v", i, err)
 		}
 	}
@@ -113,7 +113,7 @@ func TestRunningMarker_SetByMarkRunningClearedByRecordRun(t *testing.T) {
 		t.Fatalf("a job that has only started has LastRun %v, want zero so it stays due", js.LastRun)
 	}
 
-	if err := s.RecordRun("gitea", run(started.Add(time.Minute), OutcomeSuccess)); err != nil {
+	if err := s.RecordRun("gitea", run(started.Add(time.Minute), OutcomeSuccess), Failing{}); err != nil {
 		t.Fatalf("RecordRun: %v", err)
 	}
 	if js := mustLoad(t, s).Jobs["gitea"]; js.Running != nil {
@@ -124,7 +124,7 @@ func TestRunningMarker_SetByMarkRunningClearedByRecordRun(t *testing.T) {
 func TestClearRunning_RemovesAStaleMarkerAndKeepsHistory(t *testing.T) {
 	s, _ := newTestStore(t)
 	finished := time.Now().UTC().Truncate(time.Second)
-	if err := s.RecordRun("gitea", run(finished, OutcomeSuccess)); err != nil {
+	if err := s.RecordRun("gitea", run(finished, OutcomeSuccess), Failing{}); err != nil {
 		t.Fatal(err)
 	}
 	if err := s.MarkRunning("gitea", finished.Add(time.Hour), TriggerTick); err != nil {
@@ -154,7 +154,7 @@ func TestClearRunning_WritesNothingWhenThereIsNoMarker(t *testing.T) {
 func TestRecordTick_KeepsJobRecords(t *testing.T) {
 	s, _ := newTestStore(t)
 	finished := time.Now().UTC().Truncate(time.Second)
-	if err := s.RecordRun("gitea", run(finished, OutcomeSuccess)); err != nil {
+	if err := s.RecordRun("gitea", run(finished, OutcomeSuccess), Failing{}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -189,6 +189,9 @@ func TestLoad_EarlierFormatIsReadAndPreserved(t *testing.T) {
 	want := time.Date(2026, 9, 30, 7, 0, 0, 0, time.UTC)
 
 	js := mustLoad(t, s).Jobs["documents"]
+	if js.FailingSince != nil || js.FailureNotified != nil {
+		t.Fatalf("an earlier-format record loaded with failing state: %+v", js)
+	}
 	if !js.LastRun.Equal(want) || js.LastOutcome != "failed" || len(js.Runs) != 0 {
 		t.Fatalf("got %+v, want LastRun=%v LastOutcome=failed and no runs", js, want)
 	}
@@ -217,7 +220,7 @@ func TestUpdates_FromSeparateStoresAllSurvive(t *testing.T) {
 		wg.Add(1)
 		go func(i int) {
 			defer wg.Done()
-			errs <- NewStore(path, lockDir).RecordRun("job-"+strconv.Itoa(i), run(finished, OutcomeSuccess))
+			errs <- NewStore(path, lockDir).RecordRun("job-"+strconv.Itoa(i), run(finished, OutcomeSuccess), Failing{})
 		}(i)
 	}
 	wg.Add(1)
@@ -241,5 +244,45 @@ func TestUpdates_FromSeparateStoresAllSurvive(t *testing.T) {
 		if _, ok := st.Jobs["job-"+strconv.Itoa(i)]; !ok {
 			t.Errorf("the record for job-%d was lost", i)
 		}
+	}
+}
+
+func TestFailingState_KeptWhileFailingClearedOnSuccess(t *testing.T) {
+	s, _ := newTestStore(t)
+	base := time.Date(2026, 1, 5, 2, 0, 0, 0, time.UTC)
+	since, notified := base, base.Add(time.Minute)
+
+	if err := s.RecordRun("gitea", run(base.Add(time.Minute), OutcomeFailed), Failing{Since: &since, Notified: &notified}); err != nil {
+		t.Fatal(err)
+	}
+	// A later failure with no new notification carries both forward.
+	if err := s.RecordRun("gitea", run(base.Add(time.Hour), OutcomeFailed), Failing{Since: &since, Notified: &notified}); err != nil {
+		t.Fatal(err)
+	}
+	js := mustLoad(t, s).Jobs["gitea"]
+	if js.FailingSince == nil || !js.FailingSince.Equal(since) || js.FailureNotified == nil || !js.FailureNotified.Equal(notified) {
+		t.Fatalf("got failing_since=%v failure_notified=%v, want %v and %v", js.FailingSince, js.FailureNotified, since, notified)
+	}
+
+	// A success clears both, whatever it is given.
+	if err := s.RecordRun("gitea", run(base.Add(2*time.Hour), OutcomeSuccess), Failing{Since: &since, Notified: &notified}); err != nil {
+		t.Fatal(err)
+	}
+	js = mustLoad(t, s).Jobs["gitea"]
+	if js.FailingSince != nil || js.FailureNotified != nil {
+		t.Fatalf("got failing_since=%v failure_notified=%v after a success, want both cleared", js.FailingSince, js.FailureNotified)
+	}
+}
+
+func TestFailingState_UnsentNotificationIsRecordedAsNil(t *testing.T) {
+	s, _ := newTestStore(t)
+	since := time.Date(2026, 1, 5, 2, 0, 0, 0, time.UTC)
+
+	if err := s.RecordRun("gitea", run(since.Add(time.Minute), OutcomeFailed), Failing{Since: &since}); err != nil {
+		t.Fatal(err)
+	}
+	js := mustLoad(t, s).Jobs["gitea"]
+	if js.FailingSince == nil || js.FailureNotified != nil {
+		t.Fatalf("got failing_since=%v failure_notified=%v, want a failing-since time and no notification time", js.FailingSince, js.FailureNotified)
 	}
 }

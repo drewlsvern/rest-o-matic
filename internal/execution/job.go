@@ -17,7 +17,37 @@ type Options struct {
 	// takes a repository lock. run and tick check it themselves, once,
 	// before anything starts.
 	StateDir string
+
+	// Prior is what was recorded about the job before this run. It decides
+	// which notifications apply; the zero value is a job that never ran.
+	Prior Prior
+	// Now is the clock; nil means time.Now. Tests set it.
+	Now func() time.Time
 }
+
+// Prior is a job's recorded state going into a run.
+type Prior struct {
+	// Failed is whether the previous run failed.
+	Failed bool
+	// LastRun is when the previous run finished; zero if there was none.
+	LastRun time.Time
+	// FailingSince and FailureNotified are as recorded with that run. Both
+	// may be nil even when Failed is set, for a state written by a version
+	// that didn't track them.
+	FailingSince    *time.Time
+	FailureNotified *time.Time
+}
+
+func (o Options) now() time.Time {
+	if o.Now != nil {
+		return o.Now()
+	}
+	return time.Now()
+}
+
+// failureNotifyInterval is the least time between failure notifications
+// for a job that keeps failing.
+const failureNotifyInterval = 24 * time.Hour
 
 // RepoOutcome is the result of attempting one job's backup+forget against
 // one repository.
@@ -62,6 +92,16 @@ type JobResult struct {
 	// finished; InterruptErr says which signal.
 	Interrupted  bool
 	InterruptErr error
+
+	// NotifyErrs are failures of notification commands. Like
+	// OutcomeHookErrs they are reported but never change the outcome.
+	NotifyErrs []error
+	// FailingSince is set when the job failed: when the first run of the
+	// current run of failures started. FailureNotified is when the failure
+	// notification was last sent during it, nil if it hasn't been. The
+	// caller records both for the next run's Prior.
+	FailingSince    *time.Time
+	FailureNotified *time.Time
 }
 
 // Success reports whether the job's before hooks, every repository it
@@ -96,6 +136,8 @@ const maxErrorEnvLen = 500
 //  3. after.always hooks (once, on every outcome)
 //  4. after.success or after.failure hooks (once, depending on the outcome
 //     including step 3)
+//  5. the config's notify commands that apply, given the outcome and
+//     opts.Prior (see notify)
 //
 // work stops steps 1-2 when cancelled (the first SIGINT/SIGTERM); the after
 // hooks still run under cleanup, which a second signal cancels. Once work
@@ -108,6 +150,7 @@ func RunJob(work, cleanup context.Context, cfg *config.Config, jobName string, o
 	job := cfg.Backups[jobName]
 	result := JobResult{Job: jobName}
 	env := []string{"RESTOMATIC_JOB=" + jobName}
+	started := opts.now()
 
 	if err := runHooksStopOnError(work, job.Hooks.Before, env); err != nil {
 		result.HookErr = err
@@ -146,7 +189,63 @@ func RunJob(work, cleanup context.Context, cfg *config.Config, jobName string, o
 	} else {
 		result.OutcomeHookErrs = runHooksAll(afterCtx, job.Hooks.After.Failure, outcomeEnv)
 	}
+
+	notify(afterCtx, cfg.Notify, opts, started, outcomeEnv, &result)
 	return result
+}
+
+// notify runs the notification commands that apply to a finished job and
+// records the job's failing state in result.
+//
+//   - failure: when the job has just started failing, and then only once
+//     failureNotifyInterval has passed since it was last sent. It counts as
+//     sent only if every command succeeded, so an alert that couldn't be
+//     delivered is tried again on the next failed run.
+//   - recovery: on a success that follows a failure.
+//   - success: on every success.
+func notify(ctx context.Context, n config.Notify, opts Options, started time.Time, outcomeEnv []string, result *JobResult) {
+	run := func(commands []string, since *time.Time) []error {
+		failingSince := ""
+		if since != nil {
+			failingSince = since.UTC().Format(time.RFC3339)
+		}
+		return runHooksAll(ctx, commands, append(outcomeEnv[:len(outcomeEnv):len(outcomeEnv)], "RESTOMATIC_FAILING_SINCE="+failingSince))
+	}
+	prior := opts.Prior
+
+	if result.Success() {
+		if prior.Failed {
+			result.NotifyErrs = run(n.Recovery, priorFailingSince(prior))
+		}
+		result.NotifyErrs = append(result.NotifyErrs, run(n.Success, nil)...)
+		return
+	}
+
+	// A failure following a failure continues that run of failures;
+	// otherwise a new one starts with this run.
+	since, notified := &started, (*time.Time)(nil)
+	if prior.Failed {
+		since, notified = priorFailingSince(prior), prior.FailureNotified
+	}
+	if len(n.Failure) > 0 && (notified == nil || opts.now().Sub(*notified) >= failureNotifyInterval) {
+		result.NotifyErrs = run(n.Failure, since)
+		notified = nil
+		if len(result.NotifyErrs) == 0 {
+			now := opts.now()
+			notified = &now
+		}
+	}
+	result.FailingSince, result.FailureNotified = since, notified
+}
+
+// priorFailingSince is when a job that was already failing began to: the
+// recorded time, or its last run for a state that never recorded one.
+func priorFailingSince(prior Prior) *time.Time {
+	if prior.FailingSince != nil {
+		return prior.FailingSince
+	}
+	lastRun := prior.LastRun
+	return &lastRun
 }
 
 // outcomeEnvVars describes a finished job to its success/failure hooks.
