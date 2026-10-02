@@ -49,8 +49,12 @@ backups:
     tags: [prod]                    # added alongside the automatic job-name tag
 ```
 
-Source paths are passed to restic as written, with no shell involved, so
-`~` and environment variables are **not** expanded. Write absolute paths.
+Source paths are passed to restic with no shell involved. A leading `~`
+(alone, or as `~/...`) is replaced with the home directory of the user
+running rest-o-matic; nothing else is expanded, so `~alice/...` and
+environment variables such as `$HOME` are taken literally. Be aware that
+under `sudo`, `~` follows whatever `HOME` sudo leaves set, which may be
+root's. For anything scheduled, absolute paths leave no room for doubt.
 
 Every snapshot is automatically tagged with its job's name (so `nas` can
 safely hold snapshots from both `documents` and `postgres` — `forget` is
