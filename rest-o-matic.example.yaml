@@ -76,6 +76,10 @@
 #
 #     # Exactly one of these three is typical for supplying the repo password:
 #     password: correct-horse-battery-staple
+#     # ...or the same password locked for this host's key, so the config
+#     # holds no plain-text secret (see "Secrets" in the README; create the
+#     # value with `rest-o-matic secret lock`):
+#     # password: !locked "YWdlLWVuY3J5cHRpb24ub3JnL3YxCi0+IFgyNTUxOSA..."
 #     # password_file: /run/secrets/restic-nas-password
 #     # password_command: "pass show restic/nas"
 #
@@ -86,9 +90,11 @@
 #
 #     # Arbitrary extra environment variables to pass to restic - e.g.
 #     # backend-specific credentials. Any key/value pairs are accepted.
+#     # Any value here can be locked too.
 #     env:
 #       AWS_ACCESS_KEY_ID: AKIA...
 #       AWS_SECRET_ACCESS_KEY: ...
+#       # AWS_SECRET_ACCESS_KEY: !locked "YWdlLWVuY3J5cHRpb24ub3JnL3YxCi0+..."
 #
 #   sftp-backup:
 #     backend: sftp

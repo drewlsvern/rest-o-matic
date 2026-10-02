@@ -63,7 +63,7 @@ once they've all finished.`,
 		// reports a boolean, not how overdue a job is.
 		sort.Strings(due)
 
-		opts := execution.Options{Restic: execution.NewResticRunner(), LockDir: lockDir()}
+		opts := execution.Options{Restic: newResticRunner(), LockDir: lockDir()}
 		work, cleanup, stop := interruptContexts()
 		defer stop()
 		attempts := dispatch(work, cleanup, cfg, store, due, opts)

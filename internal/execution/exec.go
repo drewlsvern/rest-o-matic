@@ -210,8 +210,12 @@ func restoreReadModeCheck(ctx context.Context, r *ResticRunner, repo config.Repo
 // in a wrapped read mode) with `restic snapshots --json <id>`, which only
 // reads the repository.
 func (r *ResticRunner) SnapshotTags(ctx context.Context, repo config.Repository, id string) ([]string, error) {
+	env, err := r.repoEnv(repo)
+	if err != nil {
+		return nil, err
+	}
 	cmd := exec.CommandContext(ctx, r.binary(), "-r", repo.URL, "snapshots", "--json", id)
-	cmd.Env = repoEnv(repo)
+	cmd.Env = env
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
 	out, err := cmd.Output()
@@ -330,7 +334,7 @@ func Exec(ctx context.Context, cfg *config.Config, repoName, mode string, args [
 
 	exitCode, err := opts.Restic.PassThrough(ctx, repo, mode, args)
 	if err != nil {
-		return ExecResult{}, err
+		return ExecResult{}, fmt.Errorf("repository %q: %w", repoName, err)
 	}
 	return ExecResult{Repository: repoName, ExitCode: exitCode}, nil
 }
@@ -349,11 +353,15 @@ func Exec(ctx context.Context, cfg *config.Config, repoName, mode string, args [
 func (r *ResticRunner) PassThrough(ctx context.Context, repo config.Repository, mode string, args []string) (exitCode int, err error) {
 	fullArgs := append([]string{"-r", repo.URL}, args...)
 
+	env, err := r.repoEnv(repo)
+	if err != nil {
+		return -1, err
+	}
 	cmd, err := r.command(ctx, mode, fullArgs)
 	if err != nil {
 		return -1, err
 	}
-	cmd.Env = repoEnv(repo)
+	cmd.Env = env
 	cmd.Stdin = os.Stdin
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr

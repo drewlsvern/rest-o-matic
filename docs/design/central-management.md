@@ -281,8 +281,6 @@ repositories:
       AWS_SECRET_ACCESS_KEY: !locked "YWdlLWVu..."
 ```
 
-(The syntax is illustrative.)
-
 - **Plain-text configs keep working.** Locked values are an additional form
   for individual secrets. A host that is not enrolled never has to use them.
   `password_file` and `password_command` are unchanged.
@@ -290,7 +288,10 @@ repositories:
   is a plain comparison and adopting a hand-edited file needs no special
   handling.
 - **The host's private key is the one sensitive file**, readable only by the
-  backup user.
+  backup user. It lives in that user's config directory
+  (`~/.config/rest-o-matic/host.key` on Linux), not in the state directory:
+  state is disposable and is deleted to fix problems, and a deleted key
+  would make every locked value unreadable.
 - **Enrolling a host with an existing config rewrites its secrets in
   place**, locking the plain-text values before the file is uploaded. That
   edit must leave comments and YAML anchors intact.
@@ -503,6 +504,7 @@ the central app's repository.
    still running from being started again.
 2. **Locked secret values.** Host keypair, the locked form in config, and
    the commands to lock and reveal a value. Useful on a single host.
+   Change: `locked-secrets`.
 3. **Enrolment and reporting.** Check-in, report, snapshot lists. The
    check-in carries config versions from the start so later steps do not
    change it.
@@ -561,6 +563,9 @@ the central app's repository.
 - The landing page lists hosts: problems pinned first in the order overdue,
   failed, needs attention; healthy hosts alphabetical; clickable column
   headers.
+- A locked value is written with a YAML tag: `password: !locked "..."`.
+- The host's private key lives in the user's config directory, not the state
+  directory.
 - A restore drill is a separate, later feature.
 - The work is split into separate changes, written one at a time.
 
@@ -583,7 +588,5 @@ the change that implements each one is written.
 
 ### Open
 
-- The exact syntax for a locked value in the config file.
-- Where the host's private key is stored.
 - The layout of the host page and the remaining screens.
 - Login and user accounts for the central app.

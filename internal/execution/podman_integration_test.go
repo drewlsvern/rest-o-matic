@@ -126,8 +126,8 @@ wait
 	if err := os.WriteFile(fake, []byte(script), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	repo := config.Repository{Backend: "local", URL: filepath.Join(dir, "repo"), Password: "x",
-		Env: map[string]string{"MARKER": marker, "STARTED": started}}
+	repo := config.Repository{Backend: "local", URL: filepath.Join(dir, "repo"), Password: config.Plain("x"),
+		Env: map[string]config.Secret{"MARKER": config.Plain(marker), "STARTED": config.Plain(started)}}
 
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan error, 1)

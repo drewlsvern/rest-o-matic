@@ -52,7 +52,7 @@ func (f readModeFakes) runner() *ResticRunner {
 }
 
 func (f readModeFakes) repo() config.Repository {
-	return config.Repository{Backend: "local", URL: filepath.Join(f.dir, "repo"), Password: "x", Env: map[string]string{"FAKES": f.dir}}
+	return config.Repository{Backend: "local", URL: filepath.Join(f.dir, "repo"), Password: config.Plain("x"), Env: map[string]config.Secret{"FAKES": config.Plain(f.dir)}}
 }
 
 // calls returns each recorded call of the named fake as one

@@ -106,7 +106,7 @@ snapshot). Otherwise the exit code is restic's.`,
 			mode = job.ReadMode()
 		}
 
-		opts := execution.Options{Restic: execution.NewResticRunner(), LockDir: lockDir(), StateDir: stateDir}
+		opts := execution.Options{Restic: newResticRunner(), LockDir: lockDir(), StateDir: stateDir}
 		result, err := execution.Exec(context.Background(), cfg, repoName, mode, resticArgs, execForce, opts)
 		if err != nil {
 			return err

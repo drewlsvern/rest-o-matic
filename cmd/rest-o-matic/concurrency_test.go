@@ -72,7 +72,7 @@ func (f *concurrencyFixture) config(maxConcurrent int, jobs ...config.Job) *conf
 			cfg.Repositories[ref.Name] = config.Repository{
 				Backend:  "local",
 				URL:      filepath.Join(f.dir, "never-initialised-"+ref.Name),
-				Password: "x",
+				Password: config.Plain("x"),
 			}
 		}
 	}
@@ -343,7 +343,7 @@ func TestDispatch_JobsSharingARepositoryBothBackUp(t *testing.T) {
 
 	repo := cfg.Repositories["nas"]
 	initCmd := exec.Command("restic", "-r", repo.URL, "init")
-	initCmd.Env = append(os.Environ(), "RESTIC_PASSWORD="+repo.Password)
+	initCmd.Env = append(os.Environ(), "RESTIC_PASSWORD="+repo.Password.Value)
 	if out, err := initCmd.CombinedOutput(); err != nil {
 		t.Fatalf("restic init: %v: %s", err, out)
 	}
@@ -377,7 +377,7 @@ func TestDispatch_JobsSharingARepositoryBothBackUp(t *testing.T) {
 	}
 
 	snapCmd := exec.Command("restic", "-r", repo.URL, "snapshots", "--json")
-	snapCmd.Env = append(os.Environ(), "RESTIC_PASSWORD="+repo.Password)
+	snapCmd.Env = append(os.Environ(), "RESTIC_PASSWORD="+repo.Password.Value)
 	out, err := snapCmd.Output()
 	if err != nil {
 		t.Fatalf("restic snapshots: %v", err)

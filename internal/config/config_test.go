@@ -107,7 +107,7 @@ repositories:
 		t.Fatalf("Load: %v", err)
 	}
 	repo := cfg.Repositories["offsite"]
-	if repo.Backend != "s3" || repo.Env["AWS_ACCESS_KEY_ID"] != "id" {
+	if repo.Backend != "s3" || repo.Env["AWS_ACCESS_KEY_ID"] != Plain("id") {
 		t.Fatalf("unexpected repository: %+v", repo)
 	}
 }

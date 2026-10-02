@@ -30,7 +30,7 @@ var runCmd = &cobra.Command{
 		}
 
 		store := state.NewStore(statePath(), lockDir())
-		opts := execution.Options{Restic: execution.NewResticRunner(), LockDir: lockDir()}
+		opts := execution.Options{Restic: newResticRunner(), LockDir: lockDir()}
 
 		work, cleanup, stop := interruptContexts()
 		defer stop()
