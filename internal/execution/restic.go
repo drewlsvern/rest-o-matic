@@ -198,7 +198,7 @@ func (r *ResticRunner) Backup(ctx context.Context, repo config.Repository, mode 
 	cmd.Stderr = &stderr
 
 	if runErr := cmd.Run(); runErr != nil {
-		err := fmt.Errorf("restic backup failed: %w: %s", runErr, stderr.String())
+		err := resticFailure("restic backup failed", runErr, stderr.String())
 		if hint := unreadableHint(runErr, stderr.String(), mode); hint != "" {
 			err = fmt.Errorf("%w\nhint: %s", err, hint)
 		}
@@ -285,7 +285,7 @@ func (r *ResticRunner) Forget(ctx context.Context, repo config.Repository, jobTa
 	cmd.Stderr = &stderr
 
 	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("restic forget failed: %w: %s", err, stderr.String())
+		return resticFailure("restic forget failed", err, stderr.String())
 	}
 	return nil
 }
