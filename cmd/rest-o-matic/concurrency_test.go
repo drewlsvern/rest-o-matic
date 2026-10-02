@@ -33,7 +33,7 @@ func newConcurrencyFixture(t *testing.T) *concurrencyFixture {
 	return &concurrencyFixture{
 		dir:   dir,
 		log:   filepath.Join(dir, "hooks.log"),
-		store: state.NewStore(filepath.Join(dir, "state", "state.json")),
+		store: state.NewStore(filepath.Join(dir, "state", "state.json"), filepath.Join(dir, "state", "locks")),
 		opts:  execution.Options{Restic: execution.NewResticRunner(), LockDir: filepath.Join(dir, "state", "locks")},
 	}
 }
@@ -94,8 +94,7 @@ func (f *concurrencyFixture) recorded(t *testing.T, job string) bool {
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, ok := st.Jobs[job]
-	return ok
+	return len(st.Jobs[job].Runs) > 0
 }
 
 type started struct {
@@ -107,7 +106,7 @@ type started struct {
 func (f *concurrencyFixture) startJob(work context.Context, cfg *config.Config, name string) <-chan started {
 	done := make(chan started, 1)
 	go func() {
-		result, kind := executeWithSlot(work, context.Background(), cfg, f.store, name, f.opts, nil)
+		result, kind := executeWithSlot(work, context.Background(), cfg, f.store, name, f.opts, state.TriggerRun, nil)
 		done <- started{result, kind}
 	}()
 	return done
@@ -321,7 +320,7 @@ func TestDispatch_DoesNotRepeatJobRunMeanwhile(t *testing.T) {
 	f := newConcurrencyFixture(t)
 	cfg := f.config(2, f.job("documents", "nas"))
 
-	if err := f.store.Update("documents", state.JobState{LastRun: time.Now(), LastOutcome: "success"}); err != nil {
+	if err := f.store.RecordRun("documents", state.RunRecord{Finished: time.Now(), Outcome: state.OutcomeSuccess}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -368,8 +367,12 @@ func TestDispatch_JobsSharingARepositoryBothBackUp(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, name := range []string{"documents", "postgres"} {
-		if got := st.Jobs[name].LastOutcome; got != "success" {
-			t.Errorf("job %s recorded as %q, want success", name, got)
+		js := st.Jobs[name]
+		if js.LastOutcome != "success" {
+			t.Errorf("job %s recorded as %q, want success", name, js.LastOutcome)
+		}
+		if len(js.Runs) != 1 || js.Runs[0].Trigger != state.TriggerTick || js.Runs[0].Repositories[0].SnapshotID == "" {
+			t.Errorf("job %s: got runs %+v, want one run started by tick with its snapshot ID", name, js.Runs)
 		}
 	}
 
@@ -432,8 +435,10 @@ func TestCLI_TickSkipsAlreadyRunningJobWithoutFailing(t *testing.T) {
 	if _, err := os.Stat(marker); err == nil {
 		t.Error("a hook ran for an already-running job")
 	}
-	if _, err := os.Stat(filepath.Join(workdir, ".rest-o-matic", "state.json")); err == nil {
-		t.Error("state was written for an already-running job")
+	// The tick records its own time, but nothing for the job.
+	st, _ := os.ReadFile(filepath.Join(workdir, ".rest-o-matic", "state.json"))
+	if contains(string(st), "documents") {
+		t.Errorf("state was written for an already-running job: %s", st)
 	}
 }
 

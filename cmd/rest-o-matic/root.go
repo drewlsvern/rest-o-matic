@@ -51,7 +51,7 @@ func init() {
 	rootCmd.PersistentFlags().StringVar(&configPath, "config", "rest-o-matic.yaml", "path to the config file")
 	rootCmd.PersistentFlags().StringVar(&stateDir, "state-dir", ".rest-o-matic", "directory for state and lock files")
 	rootCmd.PersistentFlags().StringVar(&colorMode, "color", "auto", "colour status output: auto, always, or never")
-	rootCmd.AddCommand(validateCmd, runCmd, tickCmd, execCmd)
+	rootCmd.AddCommand(validateCmd, runCmd, tickCmd, statusCmd, execCmd)
 }
 
 func statePath() string { return filepath.Join(stateDir, statedir.StateFile) }

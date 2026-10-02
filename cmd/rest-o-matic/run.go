@@ -29,13 +29,13 @@ var runCmd = &cobra.Command{
 			return err
 		}
 
-		store := state.NewStore(statePath())
+		store := state.NewStore(statePath(), lockDir())
 		opts := execution.Options{Restic: execution.NewResticRunner(), LockDir: lockDir()}
 
 		work, cleanup, stop := interruptContexts()
 		defer stop()
 
-		result, kind := executeWithSlot(work, cleanup, cfg, store, jobName, opts, nil)
+		result, kind := executeWithSlot(work, cleanup, cfg, store, jobName, opts, state.TriggerRun, nil)
 		switch kind {
 		case jobAlreadyRunning:
 			return fmt.Errorf("job %q is already running", jobName)

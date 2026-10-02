@@ -1,6 +1,7 @@
-// Package state persists per-job last-run information in a local JSON file,
-// so that "tick" invocations - each a separate, one-shot process - can
-// determine due-ness without any process staying resident between them.
+// Package state persists per-job run information in a local JSON file, so
+// that "tick" invocations - each a separate, one-shot process - can
+// determine due-ness without any process staying resident between them, and
+// so that "status" can report what happened without consulting any log.
 package state
 
 import (
@@ -11,35 +12,98 @@ import (
 	"path/filepath"
 	"sync"
 	"time"
+
+	"github.com/drewlsvern/rest-o-matic/internal/lock"
 )
 
-// JobState is what's recorded about a single job's most recent execution.
+// Values recorded in the state file.
+const (
+	OutcomeSuccess = "success"
+	OutcomeFailed  = "failed"
+
+	TriggerTick = "tick"
+	TriggerRun  = "run"
+
+	ResultOK           = "ok"
+	ResultBackupFailed = "backup_failed"
+	ResultForgetFailed = "forget_failed"
+)
+
+// MaxRuns is how many of a job's most recent runs are kept.
+const MaxRuns = 20
+
+// RepoResult is what one run did against one repository.
+type RepoResult struct {
+	Name   string `json:"name"`
+	Result string `json:"result"`
+	// Error is a one-line description of the failure, empty when Result is
+	// ResultOK.
+	Error string `json:"error,omitempty"`
+	// SnapshotID is the snapshot the backup created, if it got that far.
+	SnapshotID string `json:"snapshot_id,omitempty"`
+}
+
+// RunRecord is one finished execution of a job.
+type RunRecord struct {
+	Started  time.Time `json:"started"`
+	Finished time.Time `json:"finished"`
+	Outcome  string    `json:"outcome"`
+	Trigger  string    `json:"trigger"`
+	// Error is a one-line description of the run's first failure, empty on
+	// success.
+	Error string `json:"error,omitempty"`
+	// Repositories holds a result for each repository the run attempted;
+	// empty when it never got as far as a backup.
+	Repositories []RepoResult `json:"repositories,omitempty"`
+}
+
+// Running marks a job whose execution has begun. It is only to be believed
+// while the job's lock is held (see lock.JobHeld): a killed process leaves
+// it behind.
+type Running struct {
+	Started time.Time `json:"started"`
+	Trigger string    `json:"trigger"`
+}
+
+// JobState is what's recorded about a single job.
 type JobState struct {
-	LastRun     time.Time `json:"last_run"`
-	LastOutcome string    `json:"last_outcome"`
+	// LastRun (when the most recent run finished) and LastOutcome are what
+	// due-ness is computed from. They are the whole of what earlier
+	// versions wrote, and are kept as they were so those files stay valid.
+	LastRun     time.Time `json:"last_run,omitzero"`
+	LastOutcome string    `json:"last_outcome,omitempty"`
+
+	Running *Running `json:"running,omitempty"`
+	// Runs are the most recent runs, newest first, at most MaxRuns.
+	Runs []RunRecord `json:"runs,omitempty"`
 }
 
 // State is the full contents of the state file.
 type State struct {
-	Jobs map[string]JobState `json:"jobs"`
+	// LastTick is when `tick` last got as far as evaluating schedules.
+	LastTick *time.Time          `json:"last_tick,omitempty"`
+	Jobs     map[string]JobState `json:"jobs"`
 }
 
-// Store reads and writes the state file, guarding writes with an in-process
-// mutex so concurrent goroutines (e.g. jobs dispatched by one tick) don't
-// race on the read-modify-write cycle.
+// Store reads and writes the state file. Every write is a read-modify-write
+// guarded twice: by an in-process mutex, and by a file lock so that
+// separate processes (an overlapping tick, a manual run) can't lose each
+// other's updates.
 type Store struct {
-	path string
-	mu   sync.Mutex
+	path    string
+	lockDir string
+	mu      sync.Mutex
 }
 
-// NewStore returns a Store backed by the JSON file at path. The file need
-// not exist yet; Load returns an empty State in that case.
-func NewStore(path string) *Store {
-	return &Store{path: path}
+// NewStore returns a Store backed by the JSON file at path, using lockDir
+// for the lock that guards writes. Neither need exist yet; Load returns an
+// empty State when the file is missing.
+func NewStore(path, lockDir string) *Store {
+	return &Store{path: path, lockDir: lockDir}
 }
 
 // Load reads the current state. A missing file is not an error - it means
-// no job has ever run.
+// no job has ever run. Load never creates or locks anything.
 func (s *Store) Load() (*State, error) {
 	data, err := os.ReadFile(s.path)
 	if errors.Is(err, os.ErrNotExist) {
@@ -58,22 +122,85 @@ func (s *Store) Load() (*State, error) {
 	return &st, nil
 }
 
-// Update sets a single job's state and writes the file back atomically.
-func (s *Store) Update(jobName string, js JobState) error {
+// RecordRun adds a finished run to the front of the job's history, dropping
+// the oldest beyond MaxRuns, and clears its running marker.
+func (s *Store) RecordRun(jobName string, run RunRecord) error {
+	return s.update(func(st *State) bool {
+		js := st.Jobs[jobName]
+		js.LastRun = run.Finished
+		js.LastOutcome = run.Outcome
+		js.Running = nil
+		js.Runs = append([]RunRecord{run}, js.Runs...)
+		if len(js.Runs) > MaxRuns {
+			js.Runs = js.Runs[:MaxRuns]
+		}
+		st.Jobs[jobName] = js
+		return true
+	})
+}
+
+// MarkRunning records that an execution of the job has begun.
+func (s *Store) MarkRunning(jobName string, started time.Time, trigger string) error {
+	return s.update(func(st *State) bool {
+		js := st.Jobs[jobName]
+		js.Running = &Running{Started: started, Trigger: trigger}
+		st.Jobs[jobName] = js
+		return true
+	})
+}
+
+// ClearRunning removes a running marker left behind by an execution that
+// was killed. The caller must hold the job's lock, which is what proves no
+// such execution is still alive. Nothing is written if there is no marker.
+func (s *Store) ClearRunning(jobName string) error {
+	return s.update(func(st *State) bool {
+		js, ok := st.Jobs[jobName]
+		if !ok || js.Running == nil {
+			return false
+		}
+		js.Running = nil
+		st.Jobs[jobName] = js
+		return true
+	})
+}
+
+// RecordTick records when a tick evaluated job schedules.
+func (s *Store) RecordTick(t time.Time) error {
+	return s.update(func(st *State) bool {
+		st.LastTick = &t
+		return true
+	})
+}
+
+// update is the one way the state file is written: it takes the
+// cross-process state lock, loads the file, applies change, and writes the
+// result back atomically if change reports that it altered anything.
+func (s *Store) update(change func(*State) bool) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+
+	l, ok, err := lock.AcquireState(s.lockDir)
+	if err != nil {
+		return err
+	}
+	if !ok {
+		return fmt.Errorf("state %s is locked by another process", s.path)
+	}
+	defer l.Unlock()
 
 	st, err := s.Load()
 	if err != nil {
 		return err
 	}
-	st.Jobs[jobName] = js
+	if !change(st) {
+		return nil
+	}
 	return s.writeAtomic(st)
 }
 
 // writeAtomic writes state to a temp file in the same directory and renames
 // it over the target path, so a crash mid-write never leaves a truncated or
-// corrupt state file behind. Callers must hold s.mu.
+// corrupt state file behind. Callers must hold s.mu and the state lock.
 func (s *Store) writeAtomic(st *State) error {
 	data, err := json.MarshalIndent(st, "", "  ")
 	if err != nil {

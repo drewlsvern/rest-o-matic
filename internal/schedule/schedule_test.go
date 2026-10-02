@@ -99,3 +99,54 @@ func TestDue_UnknownScheduleErrors(t *testing.T) {
 		t.Fatal("expected an error for an unknown schedule name")
 	}
 }
+
+func TestNext_StartOfTheFollowingPeriod(t *testing.T) {
+	lastRun := mustTime(t, "2026-01-07T14:10:00Z") // a Wednesday
+	for sched, want := range map[string]string{
+		"hourly": "2026-01-07T15:00:00Z",
+		"daily":  "2026-01-08T00:00:00Z",
+		"weekly": "2026-01-11T00:00:00Z", // the next Sunday
+	} {
+		got, err := Next(sched, lastRun)
+		if err != nil {
+			t.Fatalf("Next(%s): %v", sched, err)
+		}
+		if !got.Equal(mustTime(t, want)) {
+			t.Errorf("Next(%s) = %v, want %s", sched, got, want)
+		}
+	}
+}
+
+func TestNext_UnknownSchedule(t *testing.T) {
+	if _, err := Next("fortnightly", mustTime(t, "2026-01-07T14:10:00Z")); err == nil {
+		t.Fatal("expected an error for an unknown schedule")
+	}
+}
+
+// status shows Next as the due time, so it must agree with what tick does.
+func TestNext_AgreesWithDue(t *testing.T) {
+	lastRun := mustTime(t, "2026-01-07T14:10:00Z")
+	for _, sched := range []string{"hourly", "daily", "weekly"} {
+		next, err := Next(sched, lastRun)
+		if err != nil {
+			t.Fatalf("Next(%s): %v", sched, err)
+		}
+		for _, c := range []struct {
+			now  time.Time
+			want bool
+		}{
+			{lastRun, false},
+			{next.Add(-time.Second), false},
+			{next, true},
+			{next.Add(100 * time.Hour), true},
+		} {
+			due, err := Due(sched, lastRun, c.now)
+			if err != nil {
+				t.Fatalf("Due(%s): %v", sched, err)
+			}
+			if due != c.want {
+				t.Errorf("Due(%s, lastRun, %v) = %v, want %v (Next = %v)", sched, c.now, due, c.want, next)
+			}
+		}
+	}
+}
