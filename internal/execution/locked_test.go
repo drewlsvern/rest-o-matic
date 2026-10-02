@@ -85,13 +85,13 @@ func TestLocked_PasswordAndEnvReachResticAsPlainText(t *testing.T) {
 	}
 	runner := f.runner()
 
-	if _, err := runner.Backup(context.Background(), repo, []string{f.dir}, []string{"job"}); err != nil {
+	if _, err := runner.Backup(context.Background(), repo, config.ReadDirect, []string{f.dir}, []string{"job"}); err != nil {
 		t.Fatalf("Backup: %v", err)
 	}
 	if err := runner.Forget(context.Background(), repo, "job", config.Retention{"daily": 7}); err != nil {
 		t.Fatalf("Forget: %v", err)
 	}
-	if code, err := runner.PassThrough(context.Background(), repo, []string{"snapshots"}); err != nil || code != 0 {
+	if code, err := runner.PassThrough(context.Background(), repo, config.ReadDirect, []string{"snapshots"}); err != nil || code != 0 {
 		t.Fatalf("PassThrough: code=%d err=%v", code, err)
 	}
 
@@ -137,7 +137,7 @@ func TestLocked_CannotUnlockFailsWithoutStartingRestic(t *testing.T) {
 	}
 	for name, c := range cases {
 		t.Run(name, func(t *testing.T) {
-			_, err := c.runner.Backup(context.Background(), c.repo, []string{f.dir}, []string{"job"})
+			_, err := c.runner.Backup(context.Background(), c.repo, config.ReadDirect, []string{f.dir}, []string{"job"})
 			if err == nil {
 				t.Fatal("expected the backup to fail")
 			}
@@ -204,7 +204,7 @@ func TestLocked_ExecUsesOnlyTheRepositoryItIsGiven(t *testing.T) {
 	}
 	opts := Options{Restic: f.runner(), LockDir: filepath.Join(f.dir, "locks")}
 
-	result, err := Exec(context.Background(), cfg, "nas", []string{"snapshots"}, false, opts)
+	result, err := Exec(context.Background(), cfg, "nas", config.ReadDirect, []string{"snapshots"}, false, opts)
 	if err != nil || result.ExitCode != 0 {
 		t.Fatalf("exec on nas: result=%+v err=%v, want it to run although offsite is locked for another host", result, err)
 	}
@@ -212,7 +212,7 @@ func TestLocked_ExecUsesOnlyTheRepositoryItIsGiven(t *testing.T) {
 		t.Fatalf("restic was started with %q, want nas's unlocked password", started)
 	}
 
-	_, err = Exec(context.Background(), cfg, "offsite", []string{"snapshots"}, false, opts)
+	_, err = Exec(context.Background(), cfg, "offsite", config.ReadDirect, []string{"snapshots"}, false, opts)
 	if err == nil || !strings.Contains(err.Error(), `repository "offsite"`) || !strings.Contains(err.Error(), "password is locked") {
 		t.Fatalf("exec on offsite: got %v, want an error naming the repository and the field", err)
 	}

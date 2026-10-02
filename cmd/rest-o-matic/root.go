@@ -11,6 +11,7 @@ import (
 	"github.com/drewlsvern/rest-o-matic/internal/config"
 	"github.com/drewlsvern/rest-o-matic/internal/execution"
 	"github.com/drewlsvern/rest-o-matic/internal/secrets"
+	"github.com/drewlsvern/rest-o-matic/internal/statedir"
 )
 
 var (
@@ -73,8 +74,8 @@ func newResticRunner() *execution.ResticRunner {
 	return runner
 }
 
-func statePath() string { return filepath.Join(stateDir, "state.json") }
-func lockDir() string   { return filepath.Join(stateDir, "locks") }
+func statePath() string { return filepath.Join(stateDir, statedir.StateFile) }
+func lockDir() string   { return filepath.Join(stateDir, statedir.LocksDir) }
 
 // loadAndValidate loads the config and rejects it if validation finds any
 // problems, printing every problem found rather than just the first.

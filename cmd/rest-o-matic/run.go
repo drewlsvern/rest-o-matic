@@ -8,6 +8,7 @@ import (
 
 	"github.com/drewlsvern/rest-o-matic/internal/execution"
 	"github.com/drewlsvern/rest-o-matic/internal/state"
+	"github.com/drewlsvern/rest-o-matic/internal/statedir"
 )
 
 var runCmd = &cobra.Command{
@@ -23,6 +24,9 @@ var runCmd = &cobra.Command{
 		}
 		if _, ok := cfg.Backups[jobName]; !ok {
 			return fmt.Errorf("no such job %q", jobName)
+		}
+		if err := statedir.Check(stateDir); err != nil {
+			return err
 		}
 
 		store := state.NewStore(statePath(), lockDir())
