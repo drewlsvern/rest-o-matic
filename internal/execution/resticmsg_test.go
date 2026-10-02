@@ -3,7 +3,9 @@ package execution
 import (
 	"errors"
 	"fmt"
+	"runtime"
 	"strings"
+	"syscall"
 	"testing"
 )
 
@@ -27,7 +29,9 @@ func TestResticMessages(t *testing.T) {
 		{"missing repository", stderrNoRepository, "repository does not exist: unable to open config file: stat /mnt/nas/restic-repo/config: no such file or directory"},
 		{"wrong password", stderrWrongPass, "wrong password or no key found"},
 		{"unreadable file", stderrUnreadable, "/srv/db/secret: open /srv/db/secret: permission denied; Warning: at least one source file could not be read"},
-		{"unreadable file, restic 0.16", stderrUnreadable016, "open /srv/db/secret: permission denied; Warning: at least one source file could not be read"},
+		// The number is the operating system's own, so its text is too:
+		// "permission denied" on Linux and macOS.
+		{"unreadable file, restic 0.16", stderrUnreadable016, "open /srv/db/secret: " + syscall.Errno(13).Error() + "; Warning: at least one source file could not be read"},
 		{"missing source path", stderrNoSource, "/home/me/gone does not exist, skipping; all source directories/files do not exist"},
 		{"empty", "", ""},
 		{"only blank lines", "\n  \n", ""},
@@ -64,6 +68,15 @@ func TestResticMessages_ManyErrorsAreCounted(t *testing.T) {
 	want := "/srv/f0: permission denied; /srv/f1: permission denied; /srv/f2: permission denied; and 17 more"
 	if got != want {
 		t.Errorf("got  %q\nwant %q", got, want)
+	}
+}
+
+func TestResticMessages_ErrorNumberReadsAsPermissionDeniedOnUnix(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("error numbers mean something else on Windows")
+	}
+	if got := resticMessages(stderrUnreadable016); !strings.Contains(got, "open /srv/db/secret: permission denied") {
+		t.Errorf("got %q, want restic 0.16's error number 13 to read as permission denied", got)
 	}
 }
 

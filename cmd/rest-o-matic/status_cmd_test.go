@@ -88,15 +88,16 @@ func TestCLI_StatusReportsFailedRunAndExitsZero(t *testing.T) {
 		}
 	}
 	// restic's own message, not the JSON it was wrapped in. With restic on
-	// PATH that message is that the repository does not exist.
+	// PATH that message says the repository's config file can't be opened;
+	// the wording around it differs between restic versions.
 	if contains(stdout, "message_type") {
 		t.Errorf("status shows restic's raw JSON: %s", stdout)
 	}
 	if _, err := exec.LookPath("restic"); err == nil {
 		state, _ := os.ReadFile(filepath.Join(workdir, ".rest-o-matic", "state.json"))
 		for name, text := range map[string]string{"status": stdout, "the state file": string(state)} {
-			if !contains(text, "repository does not exist") || contains(text, "message_type") {
-				t.Errorf("expected %s to carry a plain \"repository does not exist\", got: %s", name, text)
+			if !contains(text, "unable to open config file") || contains(text, "message_type") {
+				t.Errorf("expected %s to carry restic's plain \"unable to open config file\" message, got: %s", name, text)
 			}
 		}
 	}
