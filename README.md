@@ -1,5 +1,7 @@
 # rest-o-matic
 
+[![CI](https://github.com/drewlsvern/rest-o-matic/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/drewlsvern/rest-o-matic/actions/workflows/ci.yml?query=branch%3Amain)
+
 A small wrapper around [restic](https://restic.net/) for backing up a server
 on a schedule. You describe what to back up, where to, and how often in one
 YAML file; rest-o-matic runs restic for you, applies retention, and tells
