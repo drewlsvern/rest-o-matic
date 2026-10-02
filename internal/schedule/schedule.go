@@ -29,6 +29,24 @@ func Truncate(t time.Time, sched string) (time.Time, error) {
 	}
 }
 
+// Next returns the start of the period after the one containing lastRun:
+// the moment from which Due starts reporting a job that last ran at lastRun
+// as due again.
+func Next(sched string, lastRun time.Time) (time.Time, error) {
+	start, err := Truncate(lastRun, sched)
+	if err != nil {
+		return time.Time{}, err
+	}
+	switch sched {
+	case "hourly":
+		return start.Add(time.Hour), nil
+	case "daily":
+		return start.AddDate(0, 0, 1), nil
+	default: // weekly; Truncate has already rejected anything else
+		return start.AddDate(0, 0, 7), nil
+	}
+}
+
 // Due reports whether a job on the given schedule should run now, given
 // when it last ran. A zero lastRun (never run before) is always due.
 func Due(sched string, lastRun, now time.Time) (bool, error) {

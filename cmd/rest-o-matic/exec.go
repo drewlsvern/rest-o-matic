@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"os"
 	"sort"
 	"time"
 
@@ -38,10 +39,11 @@ const (
 // (waiting). All are cross-process and shared by tick and run alike, and
 // all are held until the job's state has been recorded.
 //
+// trigger (state.TriggerTick or state.TriggerRun) is recorded with the run.
 // stillDue, if non-nil, is consulted once the job lock is held: the caller's
 // view of what is due may be stale by then, and while the lock is held
 // nobody else can run the job.
-func executeWithSlot(work, cleanup context.Context, cfg *config.Config, store *state.Store, name string, opts execution.Options, stillDue func() bool) (execution.JobResult, startKind) {
+func executeWithSlot(work, cleanup context.Context, cfg *config.Config, store *state.Store, name string, opts execution.Options, trigger string, stillDue func() bool) (execution.JobResult, startKind) {
 	setupFailed := func(err error) (execution.JobResult, startKind) {
 		if work.Err() != nil {
 			return execution.JobResult{}, jobNotStarted
@@ -57,6 +59,10 @@ func executeWithSlot(work, cleanup context.Context, cfg *config.Config, store *s
 		return execution.JobResult{Job: name}, jobAlreadyRunning
 	}
 	defer jobLock.Unlock()
+
+	// Holding the job lock proves no earlier execution is alive, so a
+	// running marker still present was left by one that was killed.
+	warnStateNotSaved(name, store.ClearRunning(name))
 
 	if stillDue != nil && !stillDue() {
 		return execution.JobResult{Job: name}, jobNotDue
@@ -83,7 +89,7 @@ func executeWithSlot(work, cleanup context.Context, cfg *config.Config, store *s
 		return execution.JobResult{}, jobNotStarted
 	}
 
-	return executeAndRecord(work, cleanup, cfg, store, name, opts), jobRan
+	return executeAndRecord(work, cleanup, cfg, store, name, opts, trigger), jobRan
 }
 
 // repositoryNames returns the repositories job backs up to, sorted and
@@ -102,16 +108,55 @@ func repositoryNames(job config.Job) []string {
 	return names
 }
 
-func executeAndRecord(work, cleanup context.Context, cfg *config.Config, store *state.Store, name string, opts execution.Options) execution.JobResult {
+// executeAndRecord runs the job and writes its run record. A state file
+// that can't be written is warned about but never changes the job's
+// outcome.
+func executeAndRecord(work, cleanup context.Context, cfg *config.Config, store *state.Store, name string, opts execution.Options, trigger string) execution.JobResult {
+	started := time.Now()
+	warnStateNotSaved(name, store.MarkRunning(name, started, trigger))
+
 	result := execution.RunJob(work, cleanup, cfg, name, opts)
 
-	outcome := "success"
-	if !result.Success() {
-		outcome = "failed"
-	}
-	_ = store.Update(name, state.JobState{LastRun: time.Now(), LastOutcome: outcome})
-
+	warnStateNotSaved(name, store.RecordRun(name, runRecord(result, started, time.Now(), trigger)))
 	return result
+}
+
+// runRecord turns a finished job's result into what the state file keeps.
+func runRecord(r execution.JobResult, started, finished time.Time, trigger string) state.RunRecord {
+	rec := state.RunRecord{
+		Started:  started,
+		Finished: finished,
+		Outcome:  state.OutcomeSuccess,
+		Trigger:  trigger,
+		Error:    r.FailureSummary(),
+	}
+	if !r.Success() {
+		rec.Outcome = state.OutcomeFailed
+	}
+	for _, ro := range r.Repos {
+		repo := state.RepoResult{
+			Name:       ro.Repository,
+			Result:     state.ResultOK,
+			Error:      ro.FailureSummary(),
+			SnapshotID: ro.SnapshotID,
+		}
+		switch {
+		case ro.BackupErr != nil:
+			repo.Result = state.ResultBackupFailed
+		case ro.ForgetErr != nil:
+			repo.Result = state.ResultForgetFailed
+		}
+		rec.Repositories = append(rec.Repositories, repo)
+	}
+	return rec
+}
+
+// warnStateNotSaved reports a failed state write on stderr. The job itself
+// is unaffected, but with no record of this run it will look due again.
+func warnStateNotSaved(job string, err error) {
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "%s job %s: state could not be saved: %v\n", color.Stderr.Warn("warning:"), job, err)
+	}
 }
 
 func printResult(r execution.JobResult) {

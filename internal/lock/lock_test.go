@@ -3,8 +3,12 @@ package lock
 import (
 	"context"
 	"errors"
+	"os"
+	"path/filepath"
 	"testing"
 	"time"
+
+	"github.com/gofrs/flock"
 )
 
 func TestAcquireRepository_SecondAttemptDeferred(t *testing.T) {
@@ -268,5 +272,99 @@ func TestWaitSlot_CancelledReturnsCause(t *testing.T) {
 
 	if _, err := WaitSlot(ctx, dir, 1, nil); !errors.Is(err, cause) {
 		t.Fatalf("got error %v, want the context's cause %v", err, cause)
+	}
+}
+
+func TestJobHeld_TrueWhileHeldFalseAfterUnlock(t *testing.T) {
+	dir := t.TempDir()
+
+	l, ok, err := AcquireJob(dir, "gitea")
+	if err != nil || !ok {
+		t.Fatalf("acquire: ok=%v err=%v", ok, err)
+	}
+	if held, err := JobHeld(dir, "gitea"); err != nil || !held {
+		t.Fatalf("JobHeld while held: held=%v err=%v, want true", held, err)
+	}
+
+	if err := l.Unlock(); err != nil {
+		t.Fatalf("unlock: %v", err)
+	}
+	if held, err := JobHeld(dir, "gitea"); err != nil || held {
+		t.Fatalf("JobHeld after unlock: held=%v err=%v, want false", held, err)
+	}
+}
+
+func TestJobHeld_MissingFileIsNotHeldAndCreatesNothing(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "locks")
+
+	if held, err := JobHeld(dir, "gitea"); err != nil || held {
+		t.Fatalf("JobHeld with no lock file: held=%v err=%v, want false", held, err)
+	}
+	if _, err := os.Stat(dir); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("JobHeld created the lock directory (stat err: %v)", err)
+	}
+}
+
+// A probe leaves the lock free for the next execution.
+func TestJobHeld_DoesNotKeepTheLock(t *testing.T) {
+	dir := t.TempDir()
+
+	l, ok, err := AcquireJob(dir, "gitea")
+	if err != nil || !ok {
+		t.Fatalf("acquire: ok=%v err=%v", ok, err)
+	}
+	l.Unlock()
+
+	if _, err := JobHeld(dir, "gitea"); err != nil {
+		t.Fatalf("JobHeld: %v", err)
+	}
+	l2, ok, err := AcquireJob(dir, "gitea")
+	if err != nil || !ok {
+		t.Fatalf("acquire after a probe: ok=%v err=%v", ok, err)
+	}
+	l2.Unlock()
+}
+
+// A status probe holds a shared lock for an instant; a job starting at
+// that moment must still get its lock.
+func TestAcquireJob_SucceedsWhenAProbeReleasesWithinTheRetryWindow(t *testing.T) {
+	dir := t.TempDir()
+
+	l, ok, err := AcquireJob(dir, "gitea")
+	if err != nil || !ok {
+		t.Fatalf("creating the lock file: ok=%v err=%v", ok, err)
+	}
+	l.Unlock()
+
+	probe := flock.New(filepath.Join(dir, jobFile("gitea")))
+	if got, err := probe.TryRLock(); err != nil || !got {
+		t.Fatalf("probe lock: got=%v err=%v", got, err)
+	}
+	time.AfterFunc(50*time.Millisecond, func() { _ = probe.Unlock() })
+
+	l2, ok, err := AcquireJob(dir, "gitea")
+	if err != nil || !ok {
+		t.Fatalf("acquire while a probe was in progress: ok=%v err=%v, want it to succeed", ok, err)
+	}
+	l2.Unlock()
+}
+
+func TestAcquireState_SerialisesHolders(t *testing.T) {
+	dir := t.TempDir()
+
+	l1, ok, err := AcquireState(dir)
+	if err != nil || !ok {
+		t.Fatalf("first acquire: ok=%v err=%v", ok, err)
+	}
+	time.AfterFunc(30*time.Millisecond, func() { _ = l1.Unlock() })
+
+	start := time.Now()
+	l2, ok, err := AcquireState(dir)
+	if err != nil || !ok {
+		t.Fatalf("second acquire: ok=%v err=%v", ok, err)
+	}
+	defer l2.Unlock()
+	if waited := time.Since(start); waited < 20*time.Millisecond {
+		t.Fatalf("second acquire returned after %v, before the first holder released", waited)
 	}
 }

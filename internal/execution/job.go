@@ -19,8 +19,22 @@ type Options struct {
 // one repository.
 type RepoOutcome struct {
 	Repository string
+	// SnapshotID is the snapshot the backup created; empty if it failed.
+	SnapshotID string
 	BackupErr  error
 	ForgetErr  error
+}
+
+// FailureSummary is a one-line description of what failed against this
+// repository, empty if nothing did.
+func (o RepoOutcome) FailureSummary() string {
+	switch {
+	case o.BackupErr != nil:
+		return oneLine(o.BackupErr.Error())
+	case o.ForgetErr != nil:
+		return oneLine(o.ForgetErr.Error())
+	}
+	return ""
 }
 
 func (o RepoOutcome) ok() bool {
@@ -140,8 +154,14 @@ func outcomeEnvVars(r JobResult) []string {
 	return []string{
 		"RESTOMATIC_OUTCOME=" + outcome,
 		"RESTOMATIC_FAILED_REPOS=" + strings.Join(failed, ","),
-		"RESTOMATIC_ERROR=" + oneLine(firstFailure(r)),
+		"RESTOMATIC_ERROR=" + r.FailureSummary(),
 	}
+}
+
+// FailureSummary is a one-line description of the job's first failure,
+// empty on success. It is what hooks receive as RESTOMATIC_ERROR.
+func (r JobResult) FailureSummary() string {
+	return oneLine(firstFailure(r))
 }
 
 // firstFailure returns the message of the most significant failure: the
@@ -184,10 +204,12 @@ func runRepo(ctx context.Context, cfg *config.Config, jobName, repoName string, 
 	repo := cfg.Repositories[repoName]
 	job := cfg.Backups[jobName]
 
-	if _, err := opts.Restic.Backup(ctx, repo, job.Source.Paths, tags); err != nil {
+	snapshotID, err := opts.Restic.Backup(ctx, repo, job.Source.Paths, tags)
+	if err != nil {
 		outcome.BackupErr = err
 		return outcome
 	}
+	outcome.SnapshotID = snapshotID
 
 	retention, err := cfg.EffectiveRetention(jobName, repoName)
 	if err != nil {

@@ -1,69 +1,245 @@
 package state
 
 import (
+	"os"
 	"path/filepath"
+	"strconv"
 	"sync"
 	"testing"
 	"time"
 )
 
-func TestLoad_MissingFileReturnsEmptyState(t *testing.T) {
+func newTestStore(t *testing.T) (*Store, string) {
+	t.Helper()
 	dir := t.TempDir()
-	s := NewStore(filepath.Join(dir, "state.json"))
+	return NewStore(filepath.Join(dir, "state.json"), filepath.Join(dir, "locks")), dir
+}
 
+func run(finished time.Time, outcome string) RunRecord {
+	return RunRecord{Started: finished.Add(-time.Minute), Finished: finished, Outcome: outcome, Trigger: TriggerTick}
+}
+
+func mustLoad(t *testing.T, s *Store) *State {
+	t.Helper()
 	st, err := s.Load()
 	if err != nil {
 		t.Fatalf("Load: %v", err)
 	}
-	if len(st.Jobs) != 0 {
-		t.Fatalf("expected empty jobs map, got %v", st.Jobs)
-	}
+	return st
 }
 
-func TestUpdate_PersistsAcrossLoads(t *testing.T) {
-	dir := t.TempDir()
-	s := NewStore(filepath.Join(dir, "state.json"))
+func TestLoad_MissingFileReturnsEmptyStateAndCreatesNothing(t *testing.T) {
+	s, dir := newTestStore(t)
 
-	now := time.Now().UTC().Truncate(time.Second)
-	if err := s.Update("postgres", JobState{LastRun: now, LastOutcome: "success"}); err != nil {
-		t.Fatalf("Update: %v", err)
+	st := mustLoad(t, s)
+	if len(st.Jobs) != 0 || st.LastTick != nil {
+		t.Fatalf("expected an empty state, got %+v", st)
 	}
-
-	st, err := s.Load()
+	entries, err := os.ReadDir(dir)
 	if err != nil {
-		t.Fatalf("Load: %v", err)
+		t.Fatal(err)
 	}
-	got, ok := st.Jobs["postgres"]
-	if !ok {
-		t.Fatal("expected postgres job state to be present")
-	}
-	if !got.LastRun.Equal(now) || got.LastOutcome != "success" {
-		t.Fatalf("got %+v, want LastRun=%v LastOutcome=success", got, now)
+	if len(entries) != 0 {
+		t.Fatalf("Load created %d entries in the state directory", len(entries))
 	}
 }
 
-func TestUpdate_ConcurrentWritesForDifferentJobsAllPersist(t *testing.T) {
-	dir := t.TempDir()
-	s := NewStore(filepath.Join(dir, "state.json"))
+func TestRecordRun_PersistsRecordAndLastRun(t *testing.T) {
+	s, _ := newTestStore(t)
+	finished := time.Now().UTC().Truncate(time.Second)
+	rec := RunRecord{
+		Started:  finished.Add(-72 * time.Second),
+		Finished: finished,
+		Outcome:  OutcomeFailed,
+		Trigger:  TriggerRun,
+		Error:    "repository offsite: restic backup failed",
+		Repositories: []RepoResult{
+			{Name: "nas", Result: ResultOK, SnapshotID: "a1b2c3d4"},
+			{Name: "offsite", Result: ResultBackupFailed, Error: "restic backup failed"},
+		},
+	}
+	if err := s.RecordRun("gitea", rec); err != nil {
+		t.Fatalf("RecordRun: %v", err)
+	}
 
+	got := mustLoad(t, s).Jobs["gitea"]
+	if !got.LastRun.Equal(finished) || got.LastOutcome != OutcomeFailed {
+		t.Fatalf("got LastRun=%v LastOutcome=%q, want %v and %q", got.LastRun, got.LastOutcome, finished, OutcomeFailed)
+	}
+	if len(got.Runs) != 1 {
+		t.Fatalf("got %d runs, want 1", len(got.Runs))
+	}
+	r := got.Runs[0]
+	if !r.Started.Equal(rec.Started) || r.Trigger != TriggerRun || r.Error != rec.Error {
+		t.Errorf("got run %+v, want %+v", r, rec)
+	}
+	if len(r.Repositories) != 2 || r.Repositories[0].SnapshotID != "a1b2c3d4" || r.Repositories[1].Result != ResultBackupFailed {
+		t.Errorf("got repositories %+v, want %+v", r.Repositories, rec.Repositories)
+	}
+}
+
+func TestRecordRun_HistoryIsNewestFirstAndCapped(t *testing.T) {
+	s, _ := newTestStore(t)
+	base := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	for i := 0; i < MaxRuns+3; i++ {
+		rec := run(base.Add(time.Duration(i)*time.Hour), OutcomeSuccess)
+		rec.Error = strconv.Itoa(i)
+		if err := s.RecordRun("postgres", rec); err != nil {
+			t.Fatalf("RecordRun %d: %v", i, err)
+		}
+	}
+
+	runs := mustLoad(t, s).Jobs["postgres"].Runs
+	if len(runs) != MaxRuns {
+		t.Fatalf("got %d runs, want %d", len(runs), MaxRuns)
+	}
+	if newest, oldest := runs[0].Error, runs[MaxRuns-1].Error; newest != strconv.Itoa(MaxRuns+2) || oldest != "3" {
+		t.Fatalf("got newest=%s oldest=%s, want newest=%d oldest=3", newest, oldest, MaxRuns+2)
+	}
+}
+
+func TestRunningMarker_SetByMarkRunningClearedByRecordRun(t *testing.T) {
+	s, _ := newTestStore(t)
+	started := time.Now().UTC().Truncate(time.Second)
+
+	if err := s.MarkRunning("gitea", started, TriggerTick); err != nil {
+		t.Fatalf("MarkRunning: %v", err)
+	}
+	js := mustLoad(t, s).Jobs["gitea"]
+	if js.Running == nil || !js.Running.Started.Equal(started) || js.Running.Trigger != TriggerTick {
+		t.Fatalf("got running %+v, want started=%v trigger=tick", js.Running, started)
+	}
+	if !js.LastRun.IsZero() {
+		t.Fatalf("a job that has only started has LastRun %v, want zero so it stays due", js.LastRun)
+	}
+
+	if err := s.RecordRun("gitea", run(started.Add(time.Minute), OutcomeSuccess)); err != nil {
+		t.Fatalf("RecordRun: %v", err)
+	}
+	if js := mustLoad(t, s).Jobs["gitea"]; js.Running != nil {
+		t.Fatalf("running marker still set after the run was recorded: %+v", js.Running)
+	}
+}
+
+func TestClearRunning_RemovesAStaleMarkerAndKeepsHistory(t *testing.T) {
+	s, _ := newTestStore(t)
+	finished := time.Now().UTC().Truncate(time.Second)
+	if err := s.RecordRun("gitea", run(finished, OutcomeSuccess)); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.MarkRunning("gitea", finished.Add(time.Hour), TriggerTick); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := s.ClearRunning("gitea"); err != nil {
+		t.Fatalf("ClearRunning: %v", err)
+	}
+	js := mustLoad(t, s).Jobs["gitea"]
+	if js.Running != nil || len(js.Runs) != 1 || !js.LastRun.Equal(finished) {
+		t.Fatalf("got %+v, want the marker gone and the earlier run kept", js)
+	}
+}
+
+func TestClearRunning_WritesNothingWhenThereIsNoMarker(t *testing.T) {
+	s, dir := newTestStore(t)
+
+	if err := s.ClearRunning("gitea"); err != nil {
+		t.Fatalf("ClearRunning: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "state.json")); err == nil {
+		t.Fatal("ClearRunning created a state file for a job with no marker")
+	}
+}
+
+func TestRecordTick_KeepsJobRecords(t *testing.T) {
+	s, _ := newTestStore(t)
+	finished := time.Now().UTC().Truncate(time.Second)
+	if err := s.RecordRun("gitea", run(finished, OutcomeSuccess)); err != nil {
+		t.Fatal(err)
+	}
+
+	tick := finished.Add(time.Minute)
+	if err := s.RecordTick(tick); err != nil {
+		t.Fatalf("RecordTick: %v", err)
+	}
+	st := mustLoad(t, s)
+	if st.LastTick == nil || !st.LastTick.Equal(tick) {
+		t.Fatalf("got LastTick %v, want %v", st.LastTick, tick)
+	}
+	if len(st.Jobs["gitea"].Runs) != 1 {
+		t.Fatal("recording a tick lost the job's run record")
+	}
+}
+
+// A file written by an earlier version holds only last_run and
+// last_outcome. It must load, and keep both until the job next runs.
+func TestLoad_EarlierFormatIsReadAndPreserved(t *testing.T) {
+	s, dir := newTestStore(t)
+	old := `{
+  "jobs": {
+    "documents": {
+      "last_run": "2026-09-30T02:00:00-05:00",
+      "last_outcome": "failed"
+    }
+  }
+}`
+	if err := os.WriteFile(filepath.Join(dir, "state.json"), []byte(old), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	want := time.Date(2026, 9, 30, 7, 0, 0, 0, time.UTC)
+
+	js := mustLoad(t, s).Jobs["documents"]
+	if !js.LastRun.Equal(want) || js.LastOutcome != "failed" || len(js.Runs) != 0 {
+		t.Fatalf("got %+v, want LastRun=%v LastOutcome=failed and no runs", js, want)
+	}
+
+	// Writing something else must not disturb it.
+	if err := s.RecordTick(want.Add(time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+	js = mustLoad(t, s).Jobs["documents"]
+	if !js.LastRun.Equal(want) || js.LastOutcome != "failed" {
+		t.Fatalf("after an unrelated write got %+v, want the earlier record unchanged", js)
+	}
+}
+
+// Separate Stores on one path stand in for separate processes: each has its
+// own mutex, so only the file lock keeps their updates from being lost.
+func TestUpdates_FromSeparateStoresAllSurvive(t *testing.T) {
+	_, dir := newTestStore(t)
+	path, lockDir := filepath.Join(dir, "state.json"), filepath.Join(dir, "locks")
+	finished := time.Now().UTC().Truncate(time.Second)
+
+	const writers = 12
 	var wg sync.WaitGroup
-	jobs := []string{"documents", "postgres", "mysql", "logs"}
-	for _, j := range jobs {
+	errs := make(chan error, writers+1)
+	for i := 0; i < writers; i++ {
 		wg.Add(1)
-		go func(name string) {
+		go func(i int) {
 			defer wg.Done()
-			_ = s.Update(name, JobState{LastRun: time.Now(), LastOutcome: "success"})
-		}(j)
+			errs <- NewStore(path, lockDir).RecordRun("job-"+strconv.Itoa(i), run(finished, OutcomeSuccess))
+		}(i)
 	}
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		errs <- NewStore(path, lockDir).RecordTick(finished)
+	}()
 	wg.Wait()
-
-	st, err := s.Load()
-	if err != nil {
-		t.Fatalf("Load: %v", err)
+	close(errs)
+	for err := range errs {
+		if err != nil {
+			t.Fatalf("concurrent update: %v", err)
+		}
 	}
-	for _, j := range jobs {
-		if _, ok := st.Jobs[j]; !ok {
-			t.Fatalf("expected job %q to be recorded after concurrent updates, got %v", j, st.Jobs)
+
+	st := mustLoad(t, NewStore(path, lockDir))
+	if st.LastTick == nil {
+		t.Error("the tick time was lost")
+	}
+	for i := 0; i < writers; i++ {
+		if _, ok := st.Jobs["job-"+strconv.Itoa(i)]; !ok {
+			t.Errorf("the record for job-%d was lost", i)
 		}
 	}
 }

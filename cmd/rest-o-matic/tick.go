@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"os"
 	"sort"
 	"sync"
 	"time"
@@ -30,13 +31,18 @@ once they've all finished.`,
 			return err
 		}
 
-		store := state.NewStore(statePath())
+		// Recorded once the config is known to be usable, so that a tick
+		// which can't do its job doesn't make the scheduler look healthy.
+		now := time.Now()
+		store := state.NewStore(statePath(), lockDir())
+		if err := store.RecordTick(now); err != nil {
+			fmt.Fprintf(os.Stderr, "%s tick time could not be saved: %v\n", color.Stderr.Warn("warning:"), err)
+		}
 		st, err := store.Load()
 		if err != nil {
 			return fmt.Errorf("loading state: %w", err)
 		}
 
-		now := time.Now()
 		var due []string
 		for name := range cfg.Backups {
 			isDue, err := jobDue(cfg, st, name, now)
@@ -161,7 +167,7 @@ func dispatch(work, cleanup context.Context, cfg *config.Config, store *state.St
 				isDue, err := jobDue(cfg, st, name, time.Now())
 				return err != nil || isDue
 			}
-			attempts[i].result, attempts[i].kind = executeWithSlot(work, cleanup, cfg, store, name, opts, stillDue)
+			attempts[i].result, attempts[i].kind = executeWithSlot(work, cleanup, cfg, store, name, opts, state.TriggerTick, stillDue)
 		}(i, name)
 	}
 	wg.Wait()
