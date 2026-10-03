@@ -230,3 +230,83 @@ repositories:
 		t.Fatalf("validation failed on a machine with no host key: %v", res.Errors)
 	}
 }
+
+func TestLockedValues(t *testing.T) {
+	pw, s3, pasted := lockedValue(t), lockedValue(t), lockedValue(t)
+	data := []byte(`
+# shared settings
+x-shared:
+  password: &pw !locked "` + pw + `"
+  s3: &s3
+    backend: s3
+    env:
+      AWS_SECRET_ACCESS_KEY: !locked "` + s3 + `"
+  unused: !locked "never used"
+repositories:
+  nas: {backend: local, url: /srv/repo, password: *pw}
+  offsite:
+    <<: *s3
+    url: "s3:https://s3.example.com/bucket/repo"
+    password: *pw
+  other:
+    backend: local
+    url: /srv/other
+    password: !locked "` + pasted + `"
+    env:
+      PREFIX: !plain "a/"
+      TOKEN: !locked ` + pasted + `
+` + lockedConfigRest)
+
+	values, err := LockedValues(data)
+	if err != nil {
+		t.Fatalf("LockedValues: %v", err)
+	}
+	want := []struct {
+		text   string
+		usedAt []string
+	}{
+		{pw, []string{`repository "nas": password`, `repository "offsite": password`}},
+		{s3, []string{`repository "offsite": env AWS_SECRET_ACCESS_KEY`}},
+		{pasted, []string{`repository "other": env TOKEN`, `repository "other": password`}},
+	}
+	if len(values) != len(want) {
+		t.Fatalf("got %d values, want %d: %+v", len(values), len(want), values)
+	}
+	for i, w := range want {
+		if values[i].Text != w.text || strings.Join(values[i].UsedAt, "|") != strings.Join(w.usedAt, "|") {
+			t.Errorf("value %d: got used at %v, want %v", i, values[i].UsedAt, w.usedAt)
+		}
+		if values[i].Line == 0 {
+			t.Errorf("value %d has no line", i)
+		}
+	}
+}
+
+func TestLockedValues_OwnKeysWinOverMerged(t *testing.T) {
+	merged, own := lockedValue(t), lockedValue(t)
+	values, err := LockedValues([]byte(`
+x-base: &base
+  password: !locked "` + merged + `"
+repositories:
+  nas:
+    <<: *base
+    backend: local
+    url: /srv/repo
+    password: !locked "` + own + `"
+`))
+	if err != nil {
+		t.Fatalf("LockedValues: %v", err)
+	}
+	if len(values) != 1 || values[0].Text != own {
+		t.Fatalf("got %+v, want only the repository's own password", values)
+	}
+}
+
+func TestLockedValues_RejectsMisplacedValues(t *testing.T) {
+	if _, err := LockedValues([]byte(`
+repositories:
+  nas: {backend: local, url: !locked "x", password: y}
+`)); err == nil {
+		t.Fatal("expected a locked url to be rejected")
+	}
+}

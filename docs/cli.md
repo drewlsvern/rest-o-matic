@@ -9,7 +9,7 @@
 | `rest-o-matic tick` | Runs every job that is due, then exits. This is what your scheduler calls |
 | `rest-o-matic status [job]` | Shows each job's last run, outcome and next due time; with a job name, its recent runs |
 | `rest-o-matic exec <repository> -- <restic args>` | Runs a restic command against a configured repository |
-| `rest-o-matic secret <keygen\|public-key\|lock\|reveal\|check>` | Manages locked config values |
+| `rest-o-matic secret <keygen\|public-key\|lock\|reveal\|check\|relock>` | Manages locked config values |
 | `rest-o-matic completion <shell>` | Prints a shell completion script |
 | `rest-o-matic --version` | Prints the version and build details |
 
@@ -36,6 +36,7 @@ For anything scheduled, give `--state-dir` as an absolute path.
 | `status` | It could not report (invalid config, unreadable state). The health of the jobs does not affect it |
 | `exec` | restic's own exit code, or 20 to 23 when rest-o-matic refused to run it (see [Running restic commands](restic-commands.md#exit-codes)) |
 | `secret check` | A locked value cannot be unlocked on this host |
+| `secret relock` | A locked value cannot be opened, or there is no host key. The config is then left unchanged |
 
 ## Output colours
 

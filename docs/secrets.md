@@ -68,6 +68,57 @@ Other commands:
   `secret reveal <repository> <ENV_NAME>` an env value, for running restic
   by hand.
 
+## Re-locking
+
+A locked value can only be opened by the keys it was locked for. When that
+set of keys changes, `secret relock` opens every locked value in the config
+and locks it again for this host's key and every key in
+`recovery-recipients`, then writes the config back. Only the locked values
+change: comments, anchors and the rest of the file stay exactly as they
+were. If any value can't be opened, nothing is written and each one is
+listed. `--dry-run` reports what would happen without writing.
+
+It's needed in three situations:
+
+- **A recovery key was added after values were locked.** Those values can't
+  be opened with it yet. Add the key to `recovery-recipients`, then run
+  `rest-o-matic secret relock`.
+- **A lost host is replaced.** On the new host, set up `recovery-recipients`
+  and run `secret keygen`, copy the config over, then open the values with
+  the recovery key:
+
+  ```sh
+  rest-o-matic secret relock --with-key /path/to/recovery.key
+  ```
+
+  The key file must be readable only by you. Delete it from the host
+  afterwards; nothing needs it again.
+- **This host's key is replaced.** Move the old key aside, create a new one
+  with `secret keygen`, and run `secret relock --with-key <the old key>`.
+
+To restore a lost host's backups without setting up a new host first, point
+`--key-file` at the recovery key; every command then uses it as the host
+key:
+
+```sh
+rest-o-matic --key-file /path/to/recovery.key exec offsite -- restore latest --target /restore
+```
+
+## Values that aren't secret
+
+An `env` value can be marked as deliberately not secret:
+
+```yaml
+    env:
+      MY_BUCKET_PREFIX: !plain "host-a/"
+```
+
+It is used exactly as if it had no marker; the marker only records the
+decision, for tools that treat unmarked plain-text values as secrets that
+haven't been locked yet. It is allowed only on `env` values.
+
+## When a value can't be unlocked
+
 A repository whose locked value can't be unlocked fails without restic being
 started, and says whether the host has no key or the value was locked for a
 different one.

@@ -96,6 +96,10 @@ type Repository struct {
 	Env map[string]Secret `yaml:"env,omitempty"`
 }
 
+// PlainTag is the YAML tag that marks an env value as deliberately not
+// secret. The value is used exactly as if it had no tag.
+const PlainTag = "!plain"
+
 // Secret is a credential in the config: either plain text, or a locked
 // value (written `!locked "..."`) that only the host's key can open. Being
 // its own type means the text can't be handed to restic without someone
@@ -104,6 +108,9 @@ type Secret struct {
 	// Value is the plain text, or the locked form when Locked is set.
 	Value  string
 	Locked bool
+	// MarkedPlain records that the value was written `!plain "..."`: plain
+	// text that the config's author says is not a secret.
+	MarkedPlain bool
 }
 
 // Plain returns a Secret holding plain text.
@@ -112,13 +119,15 @@ func Plain(value string) Secret { return Secret{Value: value} }
 // IsZero reports whether no value was given at all.
 func (s Secret) IsZero() bool { return s.Value == "" && !s.Locked }
 
-// UnmarshalYAML accepts a scalar, noting whether it carries the locked tag.
+// UnmarshalYAML accepts a scalar, noting whether it carries the locked or
+// the plain tag.
 func (s *Secret) UnmarshalYAML(value *yaml.Node) error {
 	if value.Kind != yaml.ScalarNode {
 		return fmt.Errorf("line %d: expected a single value", value.Line)
 	}
 	s.Value = value.Value
 	s.Locked = value.Tag == secrets.Tag
+	s.MarkedPlain = value.Tag == PlainTag
 	return nil
 }
 

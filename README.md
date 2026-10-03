@@ -138,7 +138,7 @@ config in plain text.
 | `tick` | Runs every job that is due; this is what your scheduler calls |
 | `status [job]` | Shows each job's last run, outcome and next due time |
 | `exec <repository> -- ...` | Runs any restic command against a repository |
-| `secret ...` | Creates the host key, and locks and reveals config values |
+| `secret ...` | Creates the host key, and locks, reveals and re-locks config values |
 
 The full list of flags and exit codes is in the
 [command reference](docs/cli.md).

@@ -2,10 +2,12 @@ package main
 
 import (
 	"bufio"
+	"bytes"
 	"errors"
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"sort"
 	"strings"
 
@@ -207,9 +209,167 @@ that locked values are well-formed, and never needs a key.)`,
 	},
 }
 
+var (
+	relockWithKey string
+	relockDryRun  bool
+)
+
+var secretRelockCmd = &cobra.Command{
+	Use:   "relock",
+	Short: "Lock every locked value in the config again, for this host's key and the recovery keys",
+	Long: `relock opens every locked value in the config and locks it again, so that it
+can be opened by this host's key and by every key in the recovery-recipients
+file, then writes the config back. Only the locked values change; comments,
+anchors and the rest of the file are left exactly as they were.
+
+Run it when the keys values should be locked for have changed:
+
+  - after adding a recovery key, so that values locked before it can be
+    opened with it too;
+  - on a replacement host, with --with-key naming the recovery key (or the
+    old host's key), so that the values can be opened with the new host's
+    key;
+  - after replacing this host's key, with --with-key naming the old one.
+
+If any value can't be opened, nothing is written and each one is listed.`,
+	Args: cobra.NoArgs,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		path, err := keyPath()
+		if err != nil {
+			return err
+		}
+		hostKey, err := secrets.LoadHostKey(path)
+		if err != nil {
+			return hostKeyError(err)
+		}
+		openKey := hostKey
+		if relockWithKey != "" {
+			if openKey, err = secrets.LoadHostKey(relockWithKey); err != nil {
+				return err
+			}
+		}
+		recovery, err := secrets.LoadRecipients(secrets.RecipientsPath(path))
+		if err != nil {
+			return err
+		}
+		if err := relockConfig(configPath, openKey, hostKey, recovery, relockDryRun); err != nil {
+			return err
+		}
+		if !relockDryRun {
+			warnIfNoRecoveryKey(path)
+		}
+		return nil
+	},
+}
+
 func init() {
 	secretLockCmd.Flags().StringArrayVar(&lockRecipients, "recipient", nil, "also lock for this public key (repeatable)")
-	secretCmd.AddCommand(secretKeygenCmd, secretPublicKeyCmd, secretLockCmd, secretRevealCmd, secretCheckCmd)
+	secretRelockCmd.Flags().StringVar(&relockWithKey, "with-key", "", "open the values with this key file instead of this host's key")
+	secretRelockCmd.Flags().BoolVar(&relockDryRun, "dry-run", false, "report what would be re-locked without changing the config")
+	secretCmd.AddCommand(secretKeygenCmd, secretPublicKeyCmd, secretLockCmd, secretRevealCmd, secretCheckCmd, secretRelockCmd)
+}
+
+// relockConfig opens every locked value in the config at path with
+// openKey and replaces it, in the file's text, with the same value locked
+// for hostKey and recovery. It writes nothing unless every value opens and
+// the result has been checked to open with hostKey.
+func relockConfig(path string, openKey, hostKey *secrets.HostKey, recovery []age.Recipient, dryRun bool) error {
+	// Replace the file a link points to, not the link.
+	if resolved, err := filepath.EvalSymlinks(path); err == nil {
+		path = resolved
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return fmt.Errorf("reading config %s: %w", path, err)
+	}
+	values, err := config.LockedValues(data)
+	if err != nil {
+		return fmt.Errorf("parsing config %s: %w", path, err)
+	}
+	if len(values) == 0 {
+		fmt.Println("the config has no locked values")
+		return nil
+	}
+
+	plain := make([]string, len(values))
+	failed := 0
+	for i, v := range values {
+		if plain[i], err = secrets.Unlock(v.Text, openKey); err != nil {
+			failed++
+			fmt.Printf("%s: %s: %v\n", strings.Join(v.UsedAt, ", "), color.Stdout.Error("cannot be opened"), err)
+		}
+	}
+	if failed > 0 {
+		return fmt.Errorf("%d of %d locked value(s) cannot be opened; the config was not changed", failed, len(values))
+	}
+	keys := fmt.Sprintf("this host's key and %d recovery key(s)", len(recovery))
+	if dryRun {
+		fmt.Printf("would re-lock %d value(s) for %s\n", len(values), keys)
+		return nil
+	}
+
+	recipients := append([]age.Recipient{hostKey.Recipient()}, recovery...)
+	out := data
+	for i, v := range values {
+		old := []byte(v.Text)
+		if !bytes.Contains(out, old) {
+			return fmt.Errorf("line %d: the locked value is not written on one line, so it can't be replaced; the config was not changed", v.Line)
+		}
+		locked, err := secrets.Lock(plain[i], recipients)
+		if err != nil {
+			return err
+		}
+		out = bytes.ReplaceAll(out, old, []byte(locked))
+	}
+
+	// Check the result before it replaces anything.
+	after, err := config.LockedValues(out)
+	if err != nil || len(after) != len(values) {
+		return fmt.Errorf("the re-locked config did not read back as expected; the config was not changed")
+	}
+	for i, v := range after {
+		if got, err := secrets.Unlock(v.Text, hostKey); err != nil || got != plain[i] {
+			return fmt.Errorf("the re-locked config did not read back as expected; the config was not changed")
+		}
+	}
+
+	if err := replaceFile(path, out); err != nil {
+		return err
+	}
+	fmt.Println(color.Stdout.Success(fmt.Sprintf("re-locked %d value(s) for %s", len(values), keys)))
+	return nil
+}
+
+// replaceFile writes data to path through a temporary file in the same
+// directory, so the file is never left half written, keeping its mode.
+func replaceFile(path string, data []byte) error {
+	info, err := os.Stat(path)
+	if err != nil {
+		return err
+	}
+	tmp, err := os.CreateTemp(filepath.Dir(path), "."+filepath.Base(path)+"-*.tmp")
+	if err != nil {
+		return fmt.Errorf("writing config: %w", err)
+	}
+	tmpPath := tmp.Name()
+	defer os.Remove(tmpPath)
+	_, err = tmp.Write(data)
+	if err == nil {
+		err = tmp.Chmod(info.Mode().Perm())
+	}
+	if err == nil {
+		err = tmp.Sync()
+	}
+	if closeErr := tmp.Close(); err == nil {
+		err = closeErr
+	}
+	if err == nil {
+		err = os.Rename(tmpPath, path)
+	}
+	if err != nil {
+		return fmt.Errorf("writing config %s: %w", path, err)
+	}
+	return nil
 }
 
 // lockTargets is every key a value locked now can be opened by: this
