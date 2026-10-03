@@ -86,7 +86,8 @@ func expandHome(p string) (string, error) {
 var configSections = map[string]bool{"max_concurrent": true, "policies": true, "repositories": true, "backups": true, "notify": true}
 
 // checkLockedPlacement rejects a locked value anywhere other than a
-// repository's password or one of its env values. Aliases and merge keys
+// repository's password or one of its env values, and a `!plain` value
+// anywhere other than an env value. Aliases and merge keys
 // are followed, so a locked value shared through an anchor is judged by
 // where it is used, not where it is defined.
 func checkLockedPlacement(root *yaml.Node) error {
@@ -124,6 +125,10 @@ func walkLocked(n *yaml.Node, path []string, depth int) error {
 			return fmt.Errorf("line %d: %s is only allowed on a repository's password and env values, not on %s",
 				n.Line, secrets.Tag, strings.Join(path, "."))
 		}
+		if n.Tag == PlainTag && !isEnvValue(path) {
+			return fmt.Errorf("line %d: %s is only allowed on a repository's env values, not on %s",
+				n.Line, PlainTag, strings.Join(path, "."))
+		}
 	case yaml.SequenceNode:
 		for i, item := range n.Content {
 			if err := walkLocked(item, append(path[:len(path):len(path)], strconv.Itoa(i)), depth+1); err != nil {
@@ -153,5 +158,10 @@ func lockable(path []string) bool {
 	if len(path) < 3 || path[0] != "repositories" {
 		return false
 	}
-	return (len(path) == 3 && path[2] == "password") || (len(path) == 4 && path[2] == "env")
+	return (len(path) == 3 && path[2] == "password") || isEnvValue(path)
+}
+
+// isEnvValue reports whether path is repositories.<name>.env.<NAME>.
+func isEnvValue(path []string) bool {
+	return len(path) == 4 && path[0] == "repositories" && path[2] == "env"
 }
