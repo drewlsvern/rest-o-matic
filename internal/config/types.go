@@ -57,7 +57,7 @@ func (n *Notify) UnmarshalYAML(value *yaml.Node) error {
 		case "success":
 			dst = &n.Success
 		default:
-			return fmt.Errorf("line %d: notify: unknown key %q (want failure, recovery, or success)", key.Line, key.Value)
+			return fmt.Errorf("line %d: notify: unknown key %q (want failure, recovery, or success)%s", key.Line, key.Value, didYouMean(key.Value, "failure", "recovery", "success"))
 		}
 		if err := val.Decode(dst); err != nil {
 			return fmt.Errorf("notify.%s: %w", key.Value, err)
@@ -69,6 +69,10 @@ func (n *Notify) UnmarshalYAML(value *yaml.Node) error {
 // Retention maps a restic keep-period name (hourly, daily, weekly, monthly,
 // yearly) to how many snapshots of that period to keep.
 type Retention map[string]int
+
+// RetentionPeriods are the retention keys rest-o-matic passes to restic,
+// each as --keep-<period>.
+var RetentionPeriods = []string{"hourly", "daily", "weekly", "monthly", "yearly"}
 
 // Policy is a named, reusable schedule + retention pair.
 type Policy struct {
@@ -147,14 +151,22 @@ func (s *Source) UnmarshalYAML(value *yaml.Node) error {
 	}
 
 	var unsupported []string
-	for k := range raw {
-		if k != "paths" {
-			unsupported = append(unsupported, k)
+	line := value.Line
+	for i := 0; i+1 < len(value.Content); i += 2 {
+		if k := value.Content[i]; k.Value != "paths" {
+			if len(unsupported) == 0 {
+				line = k.Line
+			}
+			unsupported = append(unsupported, k.Value)
 		}
 	}
 	if len(unsupported) > 0 {
+		hint := ""
+		if len(unsupported) == 1 {
+			hint = didYouMean(unsupported[0], "paths")
+		}
 		sort.Strings(unsupported)
-		return fmt.Errorf("source: unsupported source type(s) %v; only 'paths' is supported in this version", unsupported)
+		return fmt.Errorf("line %d: source: unsupported source type(s) %v; only 'paths' is supported in this version%s", line, unsupported, hint)
 	}
 
 	if pathsNode, ok := raw["paths"]; ok {
@@ -206,7 +218,7 @@ func (a *AfterHooks) UnmarshalYAML(value *yaml.Node) error {
 			case "failure":
 				dst = &a.Failure
 			default:
-				return fmt.Errorf("line %d: after: unknown key %q (want always, success, or failure)", key.Line, key.Value)
+				return fmt.Errorf("line %d: after: unknown key %q (want always, success, or failure)%s", key.Line, key.Value, didYouMean(key.Value, "always", "success", "failure"))
 			}
 			if err := val.Decode(dst); err != nil {
 				return fmt.Errorf("after.%s: %w", key.Value, err)

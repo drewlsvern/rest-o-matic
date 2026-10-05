@@ -12,6 +12,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -242,23 +243,13 @@ func permissionDenied(stderr string) bool {
 }
 
 // retentionFlag maps a Retention key to the restic --keep-* flag it
-// corresponds to. Unknown keys are ignored rather than rejected, since the
-// config layer does not restrict what keys a policy may declare.
+// corresponds to. Unknown keys are ignored here; validation warns about
+// them.
 func retentionFlag(period string) (string, bool) {
-	switch period {
-	case "hourly":
-		return "--keep-hourly", true
-	case "daily":
-		return "--keep-daily", true
-	case "weekly":
-		return "--keep-weekly", true
-	case "monthly":
-		return "--keep-monthly", true
-	case "yearly":
-		return "--keep-yearly", true
-	default:
+	if !slices.Contains(config.RetentionPeriods, period) {
 		return "", false
 	}
+	return "--keep-" + period, true
 }
 
 // Forget runs `restic forget`, scoped to snapshots carrying jobTag, using

@@ -134,6 +134,7 @@ config in plain text.
 | Command | What it does |
 |---|---|
 | `validate` | Checks the config without running anything |
+| `schema` | Prints a JSON Schema of the config, for editors |
 | `run <job>` | Runs one job now |
 | `tick` | Runs every job that is due; this is what your scheduler calls |
 | `status [job]` | Shows each job's last run, outcome and next due time |
@@ -149,7 +150,7 @@ The full list of flags and exit codes is in the
 | Page | What's in it |
 |---|---|
 | [Installation](docs/installation.md) | Install scripts, manual downloads, building from source |
-| [Configuration](docs/configuration.md) | Sources, repositories, policies, retention overrides, hooks |
+| [Configuration](docs/configuration.md) | Sources, repositories, policies, retention overrides, hooks, checking a config, editor support |
 | [Scheduling](docs/scheduling.md) | Schedules, cron and systemd timer setups, keeping the output |
 | [Status](docs/status.md) | Reading `status`, its JSON output |
 | [Notifications](docs/notifications.md) | Being told when a job fails and when it recovers |

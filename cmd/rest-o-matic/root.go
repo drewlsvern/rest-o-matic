@@ -55,7 +55,7 @@ func init() {
 	rootCmd.PersistentFlags().StringVar(&stateDir, "state-dir", ".rest-o-matic", "directory for state and lock files")
 	rootCmd.PersistentFlags().StringVar(&keyFile, "key-file", "", "host key for locked config values (default: host.key in your user config directory)")
 	rootCmd.PersistentFlags().StringVar(&colorMode, "color", "auto", "colour status output: auto, always, or never")
-	rootCmd.AddCommand(validateCmd, runCmd, tickCmd, statusCmd, execCmd, secretCmd, enrolCmd, unenrolCmd, checkinCmd)
+	rootCmd.AddCommand(validateCmd, runCmd, tickCmd, statusCmd, execCmd, secretCmd, enrolCmd, unenrolCmd, checkinCmd, schemaCmd)
 }
 
 // keyPath is where the host key is: --key-file, or the default location.
@@ -81,25 +81,27 @@ func lockDir() string   { return filepath.Join(stateDir, statedir.LocksDir) }
 // problems, printing every problem found rather than just the first.
 // Warnings are printed but never reject the config.
 func loadAndValidate() (*config.Config, error) {
-	cfg, err := config.Load(configPath)
-	if err != nil {
-		return nil, err
-	}
-	res := config.Validate(cfg)
-	printConfigWarnings(res.Warnings)
-	if errs := res.Errors; len(errs) > 0 {
-		for _, e := range errs {
-			fmt.Fprintln(os.Stderr, color.Stderr.Error("config error:"), e)
-		}
-		return nil, fmt.Errorf("%d config validation error(s)", len(errs))
+	cfg, problems := config.Check(configPath)
+	if n := printProblems(problems); n > 0 {
+		return nil, fmt.Errorf("%d config validation error(s)", n)
 	}
 	return cfg, nil
 }
 
-// printConfigWarnings writes each config warning to stderr, ahead of any
-// errors so an error count stays the last line of output.
-func printConfigWarnings(warns []config.Warning) {
-	for _, w := range warns {
-		fmt.Fprintln(os.Stderr, color.Stderr.Warn("config warning:"), w)
+// printProblems writes each config problem to stderr, warnings ahead of
+// errors so that an error count stays the last line of output, and
+// returns how many errors there were.
+func printProblems(problems []config.Problem) (errors int) {
+	for _, p := range problems {
+		if p.Severity == config.SeverityWarning {
+			fmt.Fprintln(os.Stderr, color.Stderr.Warn("config warning:"), p)
+		}
 	}
+	for _, p := range problems {
+		if p.Severity == config.SeverityError {
+			fmt.Fprintln(os.Stderr, color.Stderr.Error("config error:"), p)
+			errors++
+		}
+	}
+	return errors
 }

@@ -1,0 +1,326 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://github.com/drewlsvern/rest-o-matic/config.schema.json",
+  "title": "rest-o-matic config",
+  "description": "A rest-o-matic config file. Values written !locked \"...\" or !plain \"...\" are strings.",
+  "type": [
+    "object",
+    "null"
+  ],
+  "properties": {
+    "max_concurrent": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "How many jobs may run at the same time on this host. Defaults to 2."
+    },
+    "policies": {
+      "type": [
+        "object",
+        "null"
+      ],
+      "description": "Named schedules and retention, referred to by a job's policy.",
+      "additionalProperties": {
+        "$ref": "#/definitions/policy"
+      }
+    },
+    "repositories": {
+      "type": [
+        "object",
+        "null"
+      ],
+      "description": "Named restic repositories, referred to by a job's repositories.",
+      "additionalProperties": {
+        "$ref": "#/definitions/repository"
+      }
+    },
+    "backups": {
+      "type": [
+        "object",
+        "null"
+      ],
+      "description": "Named backup jobs.",
+      "additionalProperties": {
+        "$ref": "#/definitions/job"
+      }
+    },
+    "notify": {
+      "$ref": "#/definitions/notify"
+    }
+  },
+  "patternProperties": {
+    "^x-": {
+      "description": "Not read by rest-o-matic; a place to define YAML anchors."
+    }
+  },
+  "additionalProperties": false,
+  "definitions": {
+    "retention": {
+      "type": "object",
+      "description": "How many snapshots of each period to keep. Only the periods given are applied.",
+      "properties": {
+        "hourly": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "How many hourly snapshots to keep"
+        },
+        "daily": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "How many daily snapshots to keep"
+        },
+        "weekly": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "How many weekly snapshots to keep"
+        },
+        "monthly": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "How many monthly snapshots to keep"
+        },
+        "yearly": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "How many yearly snapshots to keep"
+        }
+      },
+      "additionalProperties": false
+    },
+    "policy": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "schedule": {
+          "enum": [
+            "hourly",
+            "daily",
+            "weekly"
+          ],
+          "description": "When the job is due: once per hour, day (from 00:00 UTC) or week (from Sunday 00:00 UTC)."
+        },
+        "retention": {
+          "$ref": "#/definitions/retention"
+        }
+      }
+    },
+    "repository": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "backend"
+      ],
+      "properties": {
+        "backend": {
+          "description": "The kind of storage. It must agree with the url's prefix: local takes a filesystem path, every other backend a url beginning with its name and a colon (rest-server uses rest:). Another value is passed on with a warning.",
+          "anyOf": [
+            {
+              "enum": [
+                "local",
+                "s3",
+                "sftp",
+                "rest",
+                "rest-server",
+                "swift",
+                "b2",
+                "azure",
+                "gs",
+                "rclone"
+              ]
+            },
+            {
+              "type": "string"
+            }
+          ]
+        },
+        "url": {
+          "type": "string",
+          "description": "The repository, exactly as restic's -r takes it, such as /mnt/nas/restic or s3:https://s3.example.com/bucket/path."
+        },
+        "password": {
+          "type": "string",
+          "description": "The repository password, in plain text or written !locked \"...\" (see rest-o-matic secret lock)."
+        },
+        "password_file": {
+          "type": "string",
+          "description": "A file holding the repository password."
+        },
+        "password_command": {
+          "type": "string",
+          "description": "A command that prints the repository password."
+        },
+        "env": {
+          "type": "object",
+          "description": "Extra environment variables for restic, such as a cloud provider's credentials. Any value may be written !locked \"...\"; one that isn't secret may be marked !plain \"...\".",
+          "additionalProperties": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "job": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "source",
+        "policy",
+        "repositories"
+      ],
+      "properties": {
+        "source": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "paths"
+          ],
+          "description": "What to back up.",
+          "properties": {
+            "paths": {
+              "type": "array",
+              "minItems": 1,
+              "items": {
+                "type": "string"
+              },
+              "description": "Files and directories to back up. A leading ~ is your home directory."
+            }
+          }
+        },
+        "hooks": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "Commands run around each run of the job.",
+          "properties": {
+            "before": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "description": "Run in order before the backup. If one fails, the backup doesn't run."
+            },
+            "after": {
+              "description": "Run after the backup: a list (the same as always), or by outcome.",
+              "oneOf": [
+                {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  },
+                  "description": "Run every time, even after a failure."
+                },
+                {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "always": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      },
+                      "description": "Run every time, first, even after a failure. A failing command fails the job."
+                    },
+                    "success": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      },
+                      "description": "Run when the job fully succeeded."
+                    },
+                    "failure": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      },
+                      "description": "Run when anything failed."
+                    }
+                  }
+                }
+              ]
+            }
+          }
+        },
+        "policy": {
+          "type": "string",
+          "description": "The name of the policy that sets the schedule and retention."
+        },
+        "retention": {
+          "$ref": "#/definitions/retention",
+          "description": "Overrides the policy's retention, period by period."
+        },
+        "repositories": {
+          "type": "array",
+          "minItems": 1,
+          "description": "Where to back up to.",
+          "items": {
+            "oneOf": [
+              {
+                "type": "string",
+                "description": "A repository's name."
+              },
+              {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "repo"
+                ],
+                "properties": {
+                  "repo": {
+                    "type": "string",
+                    "description": "A repository's name."
+                  },
+                  "retention": {
+                    "$ref": "#/definitions/retention",
+                    "description": "Overrides the retention for this repository only, period by period."
+                  }
+                }
+              }
+            ]
+          }
+        },
+        "tags": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Tags added to every snapshot, besides the job's name."
+        },
+        "read_as": {
+          "enum": [
+            "direct",
+            "podman-unshare"
+          ],
+          "description": "How the source is read: direct (the default), or podman-unshare for files written by rootless Podman containers (Linux only)."
+        }
+      }
+    },
+    "notify": {
+      "type": [
+        "object",
+        "null"
+      ],
+      "additionalProperties": false,
+      "description": "Commands that report on every job.",
+      "properties": {
+        "failure": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Run when a job starts failing, then at most once a day while it keeps failing."
+        },
+        "recovery": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Run on the first success after a failure."
+        },
+        "success": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Run after every success."
+        }
+      }
+    }
+  }
+}

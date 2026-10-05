@@ -19,7 +19,10 @@ var (
 type ValidationError struct {
 	Job        string
 	Repository string
-	Message    string
+	// Path is the dotted path of the field concerned, such as
+	// backups.docs.policy, used to find it in the file.
+	Path    string
+	Message string
 }
 
 func (e ValidationError) Error() string {
@@ -37,7 +40,9 @@ func (e ValidationError) Error() string {
 type Warning struct {
 	Job        string
 	Repository string
-	Message    string
+	// Path is the dotted path of the field concerned.
+	Path    string
+	Message string
 }
 
 func (w Warning) String() string {
@@ -75,22 +80,23 @@ func Validate(cfg *Config) Result {
 	}
 
 	for name, job := range cfg.Backups {
+		at := "backups." + name + "."
 		if job.Policy == "" {
-			res.Errors = append(res.Errors, ValidationError{Job: name, Message: "must reference a policy"})
+			res.Errors = append(res.Errors, ValidationError{Job: name, Path: at + "policy", Message: "must reference a policy"})
 		} else if _, ok := cfg.Policies[job.Policy]; !ok {
-			res.Errors = append(res.Errors, ValidationError{Job: name, Message: fmt.Sprintf("references undefined policy %q", job.Policy)})
+			res.Errors = append(res.Errors, ValidationError{Job: name, Path: at + "policy", Message: fmt.Sprintf("references undefined policy %q", job.Policy)})
 		}
 
 		if len(job.Source.Paths) == 0 {
-			res.Errors = append(res.Errors, ValidationError{Job: name, Message: "source.paths must be non-empty"})
+			res.Errors = append(res.Errors, ValidationError{Job: name, Path: at + "source.paths", Message: "source.paths must be non-empty"})
 		}
 
 		if len(job.Repositories) == 0 {
-			res.Errors = append(res.Errors, ValidationError{Job: name, Message: "must reference at least one repository"})
+			res.Errors = append(res.Errors, ValidationError{Job: name, Path: at + "repositories", Message: "must reference at least one repository"})
 		}
-		for _, ref := range job.Repositories {
+		for i, ref := range job.Repositories {
 			if _, ok := cfg.Repositories[ref.Name]; !ok {
-				res.Errors = append(res.Errors, ValidationError{Job: name, Message: fmt.Sprintf("references undefined repository %q", ref.Name)})
+				res.Errors = append(res.Errors, ValidationError{Job: name, Path: fmt.Sprintf("%srepositories.%d", at, i), Message: fmt.Sprintf("references undefined repository %q", ref.Name)})
 			}
 		}
 
@@ -115,13 +121,13 @@ func checkReadMode(name string, job Job) (*Warning, error) {
 		return nil, nil
 	case ReadPodmanUnshare:
 		if goos != "linux" {
-			return nil, ValidationError{Job: name, Message: fmt.Sprintf("read_as: %s is not needed on %s: Podman runs containers in a VM there and bind-mounted files are readable directly; remove read_as", ReadPodmanUnshare, goos)}
+			return nil, ValidationError{Job: name, Path: "backups." + name + ".read_as", Message: fmt.Sprintf("read_as: %s is not needed on %s: Podman runs containers in a VM there and bind-mounted files are readable directly; remove read_as", ReadPodmanUnshare, goos)}
 		}
 		if _, err := lookPath("podman"); err != nil {
-			return &Warning{Job: name, Message: fmt.Sprintf("read_as: %s needs podman, which was not found on PATH", ReadPodmanUnshare)}, nil
+			return &Warning{Job: name, Path: "backups." + name + ".read_as", Message: fmt.Sprintf("read_as: %s needs podman, which was not found on PATH", ReadPodmanUnshare)}, nil
 		}
 		return nil, nil
 	default:
-		return nil, ValidationError{Job: name, Message: fmt.Sprintf("read_as: unknown value %q (allowed: %s, %s)", job.ReadAs, ReadDirect, ReadPodmanUnshare)}
+		return nil, ValidationError{Job: name, Path: "backups." + name + ".read_as", Message: fmt.Sprintf("read_as: unknown value %q (allowed: %s, %s)", job.ReadAs, ReadDirect, ReadPodmanUnshare)}
 	}
 }

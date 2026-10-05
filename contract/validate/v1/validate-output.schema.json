@@ -1,0 +1,97 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/drewlsvern/rest-o-matic/contract/validate/v1/validate-output.schema.json",
+  "title": "validate --json output",
+  "description": "What `rest-o-matic validate --json` prints: one document, whatever the outcome.",
+  "type": "object",
+  "required": [
+    "format_version",
+    "rest_o_matic_version",
+    "valid",
+    "problems"
+  ],
+  "properties": {
+    "format_version": {
+      "const": 1
+    },
+    "rest_o_matic_version": {
+      "type": "string",
+      "description": "The version of rest-o-matic that validated the config"
+    },
+    "valid": {
+      "type": "boolean",
+      "description": "True when no problem is an error"
+    },
+    "problems": {
+      "type": "array",
+      "description": "Sorted by line, then column; problems with no line first",
+      "items": {
+        "$ref": "#/$defs/problem"
+      }
+    }
+  },
+  "$defs": {
+    "problem": {
+      "type": "object",
+      "required": [
+        "severity",
+        "message",
+        "job",
+        "repository",
+        "path",
+        "line",
+        "column"
+      ],
+      "properties": {
+        "severity": {
+          "enum": [
+            "error",
+            "warning"
+          ]
+        },
+        "message": {
+          "type": "string",
+          "minLength": 1,
+          "description": "For a person. Does not repeat the job, repository or line."
+        },
+        "job": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "The job the problem concerns"
+        },
+        "repository": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "The repository the problem concerns"
+        },
+        "path": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "The dotted path of the field, such as backups.docs.policy or backups.docs.repositories.1"
+        },
+        "line": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 1,
+          "description": "1-based line in the config file"
+        },
+        "column": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 1,
+          "description": "1-based column, counted in characters"
+        }
+      }
+    }
+  }
+}

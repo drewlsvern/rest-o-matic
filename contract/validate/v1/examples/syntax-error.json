@@ -1,0 +1,16 @@
+{
+  "format_version": 1,
+  "rest_o_matic_version": "v0.2.0",
+  "valid": false,
+  "problems": [
+    {
+      "severity": "error",
+      "message": "did not find expected ',' or '}'",
+      "job": null,
+      "repository": null,
+      "path": null,
+      "line": 2,
+      "column": null
+    }
+  ]
+}

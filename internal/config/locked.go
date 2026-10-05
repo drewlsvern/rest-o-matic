@@ -92,8 +92,12 @@ func LockedValues(data []byte) ([]LockedValue, error) {
 }
 
 type entry struct {
-	key   string
-	value *yaml.Node
+	key     string
+	keyNode *yaml.Node
+	value   *yaml.Node
+	// via is the alias in this mapping's `<<` that the entry was merged
+	// in through; nil for the mapping's own keys.
+	via *yaml.Node
 }
 
 // mappingEntries returns a mapping's keys and values as the decoder sees
@@ -108,17 +112,19 @@ func mappingEntries(n *yaml.Node, depth int) []entry {
 	for i := 0; i+1 < len(n.Content); i += 2 {
 		key, value := n.Content[i], n.Content[i+1]
 		if key.Tag == "!!merge" {
-			value = resolve(value)
 			sources := []*yaml.Node{value}
-			if value.Kind == yaml.SequenceNode {
-				sources = value.Content
+			if r := resolve(value); r.Kind == yaml.SequenceNode {
+				sources = r.Content
 			}
 			for _, src := range sources {
-				merged = append(merged, mappingEntries(src, depth+1)...)
+				for _, e := range mappingEntries(src, depth+1) {
+					e.via = src
+					merged = append(merged, e)
+				}
 			}
 			continue
 		}
-		own = append(own, entry{key.Value, value})
+		own = append(own, entry{key: key.Value, keyNode: key, value: value})
 	}
 	seen := map[string]bool{}
 	var out []entry

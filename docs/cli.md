@@ -4,7 +4,8 @@
 
 | Command | What it does |
 |---|---|
-| `rest-o-matic validate` | Checks the config file and reports every problem, without running anything |
+| `rest-o-matic validate [--json]` | Checks the config file and reports every problem with its line, without running anything; `--json` prints one JSON document |
+| `rest-o-matic schema` | Prints a JSON Schema of the config file, for editors |
 | `rest-o-matic run <job>` | Runs one job now, whether or not it is due |
 | `rest-o-matic tick` | Runs every job that is due, then exits. This is what your scheduler calls |
 | `rest-o-matic status [job]` | Shows each job's last run, outcome and next due time; with a job name, its recent runs |
@@ -33,7 +34,7 @@ For anything scheduled, give `--state-dir` as an absolute path.
 
 | Command | Non-zero when |
 |---|---|
-| `validate` | The config has an error. Warnings alone exit 0 |
+| `validate` | The config has an error, or couldn't be read. Warnings alone exit 0. The same with `--json` |
 | `run` | The job failed, was interrupted, or is already running |
 | `tick` | A due job failed or could not be started. A job skipped because it is already running does not count |
 | `status` | It could not report (invalid config, unreadable state). The health of the jobs does not affect it |
