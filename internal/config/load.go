@@ -23,21 +23,30 @@ func Load(path string) (*Config, error) {
 	if err != nil {
 		return nil, fmt.Errorf("reading config %s: %w", path, err)
 	}
+	cfg, _, err := parse(data)
+	if err != nil {
+		return nil, fmt.Errorf("parsing config %s: %w", path, err)
+	}
+	return cfg, nil
+}
 
+// parse turns a config file's contents into a Config, and also returns
+// the YAML node tree it was decoded from.
+func parse(data []byte) (*Config, *yaml.Node, error) {
 	// Parsed to a node tree first, so that a locked value in a place that
 	// can't hold one is caught: decoding alone would quietly accept it as
 	// the text of an ordinary field.
 	var root yaml.Node
 	if err := yaml.Unmarshal(data, &root); err != nil {
-		return nil, fmt.Errorf("parsing config %s: %w", path, err)
+		return nil, nil, err
 	}
 	if err := checkLockedPlacement(&root); err != nil {
-		return nil, fmt.Errorf("parsing config %s: %w", path, err)
+		return nil, nil, err
 	}
 	var cfg Config
 	if root.Kind != 0 { // an empty file has no document node to decode
 		if err := root.Decode(&cfg); err != nil {
-			return nil, fmt.Errorf("parsing config %s: %w", path, err)
+			return nil, nil, err
 		}
 	}
 
@@ -46,7 +55,7 @@ func Load(path string) (*Config, error) {
 		for i, p := range job.Source.Paths {
 			expanded, err := expandHome(p)
 			if err != nil {
-				return nil, fmt.Errorf("config %s: job %q: source path %q: %w", path, name, p, err)
+				return nil, nil, fmt.Errorf("job %q: source path %q: %w", name, p, err)
 			}
 			job.Source.Paths[i] = expanded
 		}
@@ -57,7 +66,7 @@ func Load(path string) (*Config, error) {
 		cfg.MaxConcurrent = DefaultMaxConcurrent
 	}
 
-	return &cfg, nil
+	return &cfg, &root, nil
 }
 
 // userHomeDir is os.UserHomeDir; a variable so tests can make it fail.

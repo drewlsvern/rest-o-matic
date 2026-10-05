@@ -125,8 +125,75 @@ has to be stopped (an interrupt, or the cleanup time limit), it and everything
 it started are killed immediately, rather than asked to exit first as on
 Linux/macOS.
 
+## Checking a config
+
 Validate a config without running anything:
 
 ```sh
 rest-o-matic validate
 ```
+
+It reports every problem with its line in the file. Errors stop the config
+from being used; warnings point at something that is probably wrong. `tick`,
+`run` and `status` run the same checks and print the same problems.
+
+`validate` needs nothing from the machine it runs on (no host key, state
+directory or source paths), so a config can be checked anywhere before it is
+copied to its host. The one exception is `read_as: podman-unshare`, which is
+checked against the operating system and whether podman is installed.
+`validate --json` prints the result as one JSON document, for programs; its
+format is described in
+[`contract/validate/v1`](../contract/validate/v1/README.md).
+
+### Misspelt and unknown keys
+
+A key rest-o-matic doesn't read is reported as a warning, with its line and
+the key you probably meant:
+
+```
+config warning: line 9: job "docs": "hook" is not a key rest-o-matic reads, and is ignored; did you mean "hooks"?
+```
+
+The key is ignored, not corrected, so in that example the job runs without
+its hooks until the key is fixed. Take these warnings seriously: a misspelt
+`hooks`, `retention` or `password_file` changes what a job does.
+
+Top-level keys starting with `x-` are not read and are never warned about.
+They are the place to define YAML anchors that the rest of the config
+reuses:
+
+```yaml
+x-shared:
+  s3: &s3
+    backend: s3
+    env: {AWS_DEFAULT_REGION: eu-west-1}
+
+repositories:
+  offsite:
+    <<: *s3
+    url: "s3:https://s3.example.com/bucket"
+```
+
+Names under a repository's `env` are environment variables of your choosing
+and are never checked.
+
+### Editor support
+
+`rest-o-matic schema` prints a JSON Schema of the config, which editors with
+YAML support use for completion, descriptions on hover, and marking mistakes
+as you type. Each release prints the schema for its own config. In VS Code,
+with the YAML extension:
+
+```sh
+rest-o-matic schema > ~/.config/rest-o-matic/config.schema.json
+```
+
+```json
+// settings.json
+"yaml.schemas": {"/home/me/.config/rest-o-matic/config.schema.json": "rest-o-matic*.yaml"},
+"yaml.customTags": ["!locked scalar", "!plain scalar"]
+```
+
+The custom tags tell the editor that `!locked "..."` and `!plain "..."` are
+ordinary values. Editors built on the same language server, such as Monaco
+with monaco-yaml, take the same two settings.

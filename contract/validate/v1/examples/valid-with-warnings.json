@@ -1,0 +1,25 @@
+{
+  "format_version": 1,
+  "rest_o_matic_version": "v0.2.0",
+  "valid": true,
+  "problems": [
+    {
+      "severity": "warning",
+      "message": "local path \"srv/nas\" is relative and resolves against the current working directory; use an absolute path",
+      "job": null,
+      "repository": "nas",
+      "path": "repositories.nas.url",
+      "line": 4,
+      "column": 30
+    },
+    {
+      "severity": "warning",
+      "message": "\"hook\" is not a key rest-o-matic reads, and is ignored; did you mean \"hooks\"?",
+      "job": "docs",
+      "repository": null,
+      "path": "backups.docs.hook",
+      "line": 9,
+      "column": 5
+    }
+  ]
+}

@@ -37,14 +37,15 @@ func urlScheme(url string) string {
 // url. Definite contradictions are errors; configurations that are probably
 // but not certainly wrong are warnings. The url itself is never modified.
 func CheckRepository(name string, repo Repository) (errs []error, warns []Warning) {
-	fail := func(format string, args ...any) {
-		errs = append(errs, ValidationError{Repository: name, Message: fmt.Sprintf(format, args...)})
+	at := "repositories." + name + "."
+	fail := func(field, format string, args ...any) {
+		errs = append(errs, ValidationError{Repository: name, Path: at + field, Message: fmt.Sprintf(format, args...)})
 	}
 
 	// A locked value is only checked for its form. No key is read, so the
 	// result is the same on every machine.
 	if repo.Password.Locked && secrets.WellFormed(repo.Password.Value) != nil {
-		fail("password is marked %s but is not a valid locked value; create one with `rest-o-matic secret lock`", secrets.Tag)
+		fail("password", "password is marked %s but is not a valid locked value; create one with `rest-o-matic secret lock`", secrets.Tag)
 	}
 	envNames := make([]string, 0, len(repo.Env))
 	for envName := range repo.Env {
@@ -53,33 +54,33 @@ func CheckRepository(name string, repo Repository) (errs []error, warns []Warnin
 	sort.Strings(envNames)
 	for _, envName := range envNames {
 		if v := repo.Env[envName]; v.Locked && secrets.WellFormed(v.Value) != nil {
-			fail("env %s is marked %s but is not a valid locked value; create one with `rest-o-matic secret lock`", envName, secrets.Tag)
+			fail("env."+envName, "env %s is marked %s but is not a valid locked value; create one with `rest-o-matic secret lock`", envName, secrets.Tag)
 		}
 	}
-	warn := func(format string, args ...any) {
-		warns = append(warns, Warning{Repository: name, Message: fmt.Sprintf(format, args...)})
+	warn := func(field, format string, args ...any) {
+		warns = append(warns, Warning{Repository: name, Path: at + field, Message: fmt.Sprintf(format, args...)})
 	}
 
 	if repo.Backend == "" {
-		fail("backend is required (e.g. local, s3, sftp, rest, b2)")
+		fail("backend", "backend is required (e.g. local, s3, sftp, rest, b2)")
 		return
 	}
 	want, known := backendScheme[repo.Backend]
 	if !known {
-		warn("unrecognised backend %q; url is passed to restic unchanged and not checked", repo.Backend)
+		warn("backend", "unrecognised backend %q; url is passed to restic unchanged and not checked", repo.Backend)
 		return
 	}
 
 	got := urlScheme(repo.URL)
 	switch {
 	case got != "" && want == "":
-		fail("backend %q but url begins with %q; set backend: %s or use a filesystem path", repo.Backend, got+":", got)
+		fail("url", "backend %q but url begins with %q; set backend: %s or use a filesystem path", repo.Backend, got+":", got)
 	case got != "" && got != want:
-		fail("backend %q requires a url beginning with %q, but url begins with %q", repo.Backend, want+":", got+":")
+		fail("url", "backend %q requires a url beginning with %q, but url begins with %q", repo.Backend, want+":", got+":")
 	case got == "" && want != "":
-		fail("backend %q requires a url beginning with %q; without it restic treats the url as a local directory", repo.Backend, want+":")
+		fail("url", "backend %q requires a url beginning with %q; without it restic treats the url as a local directory", repo.Backend, want+":")
 	case got == "" && !filepath.IsAbs(repo.URL):
-		warn("local path %q is relative and resolves against the current working directory; use an absolute path", repo.URL)
+		warn("url", "local path %q is relative and resolves against the current working directory; use an absolute path", repo.URL)
 	}
 	return
 }

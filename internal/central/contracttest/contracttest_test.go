@@ -43,3 +43,19 @@ func TestExamplesMatchSchemas(t *testing.T) {
 		})
 	}
 }
+
+func TestValidateExamplesMatchSchema(t *testing.T) {
+	paths, _ := filepath.Glob(filepath.Join(Root(), "validate", "v1", "examples", "*.json"))
+	if len(paths) < 5 {
+		t.Fatalf("found %d examples, expected at least 5", len(paths))
+	}
+	for _, path := range paths {
+		t.Run(filepath.Base(path), func(t *testing.T) {
+			data, err := os.ReadFile(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			Validate(t, "validate-output", data)
+		})
+	}
+}

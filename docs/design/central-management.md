@@ -488,8 +488,9 @@ pipeline uses, and puts two runtimes in one process. Reimplementing the
 rules in C# would drift from the host's.
 
 This needs two small additions to the CLI: JSON output for `validate`, and
-a JSON Schema for the config file generated from the Go types, which gives
-the editor autocomplete and structural checks in the browser.
+a JSON Schema for the config file, built into each release and checked
+against the Go types by tests, which gives the editor autocomplete and
+structural checks in the browser.
 
 ### Consequences of Blazor Server
 
