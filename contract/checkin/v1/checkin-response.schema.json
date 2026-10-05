@@ -1,0 +1,42 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/drewlsvern/rest-o-matic/contract/checkin/v1/checkin-response.schema.json",
+  "title": "Check-in reply",
+  "description": "200 reply to POST /api/v1/checkin",
+  "type": "object",
+  "required": [
+    "format_version",
+    "server_time",
+    "resend"
+  ],
+  "properties": {
+    "format_version": {
+      "const": 1
+    },
+    "server_time": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "resend": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": {
+        "enum": [
+          "status",
+          "snapshots",
+          "config"
+        ]
+      },
+      "description": "Parts to include in full in the next check-in whatever their fingerprints"
+    },
+    "config": {
+      "type": "null",
+      "description": "Reserved for config sent from the central app; always null in this version"
+    },
+    "actions": {
+      "type": "array",
+      "maxItems": 0,
+      "description": "Reserved for queued actions; always empty in this version"
+    }
+  }
+}

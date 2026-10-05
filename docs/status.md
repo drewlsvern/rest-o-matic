@@ -5,6 +5,7 @@ running anything or touching a repository:
 
 ```
 last tick: 2 minutes ago
+central app: https://backups.example.com, last check-in 2 minutes ago
 
 JOB        SCHEDULE  LAST RUN        OUTCOME  TOOK   NEXT DUE
 documents  daily     6 hours ago     ok       1m12s  in 18 hours
@@ -18,6 +19,10 @@ postgres   hourly    1 hour ago      ok       8s     due since 19:00
 
 - **last tick** is when `tick` last ran. If it's older than your cron
   interval, the scheduler has stopped firing.
+- **central app** shows whether the host reports to the
+  [central app](central-app.md), when it last did, and why the latest
+  attempt failed if it did. It also says when the config is not being
+  backed up there, and why.
 - **NEXT DUE** is when `tick` will next start the job. Schedule boundaries
   are in UTC (a daily job is due from 00:00 UTC); they are shown here in
   your local time.
@@ -70,6 +75,11 @@ monitoring. Times are UTC, and values that don't apply are `null`.
 Every job carries a `snapshot_lists` entry for each of its repositories,
 with when the list was taken, how many snapshots it holds and the newest
 one's time. `status <job> --json` adds the snapshots themselves.
+
+`checkin` describes the link to the central app: `enrolled`, and, when
+enrolled for this config, `url`, `host_id`, `host_name`, `last_attempt`,
+`last_success`, `last_error` (null when the latest attempt succeeded) and
+`config_withheld` (the fields keeping the config from being sent, or null).
 
 `status` exits 0 whenever it could report, whatever the health of the jobs,
 and only reads: it is safe to run as any user that can read the state

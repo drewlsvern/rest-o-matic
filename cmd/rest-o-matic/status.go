@@ -59,6 +59,7 @@ of the jobs; use --json to act on the details from a script.`,
 		if err != nil {
 			return err
 		}
+		report.Checkin = checkinStatusFor(cfg, st)
 
 		if statusJSON {
 			enc := json.NewEncoder(os.Stdout)
@@ -91,6 +92,29 @@ type statusReport struct {
 	GeneratedAt   time.Time   `json:"generated_at"`
 	LastTick      *time.Time  `json:"last_tick"`
 	Jobs          []jobStatus `json:"jobs"`
+	// Checkin is the link to the central app; null only where status
+	// wasn't asked about it.
+	Checkin *checkinStatus `json:"checkin"`
+}
+
+// checkinStatus is what is known about reporting to the central app.
+// Everything but Enrolled is null when the host isn't enrolled for this
+// config.
+type checkinStatus struct {
+	Enrolled    bool       `json:"enrolled"`
+	URL         *string    `json:"url"`
+	HostID      *string    `json:"host_id"`
+	HostName    *string    `json:"host_name"`
+	LastAttempt *time.Time `json:"last_attempt"`
+	LastSuccess *time.Time `json:"last_success"`
+	// LastError is why the most recent attempt failed; null if it
+	// succeeded.
+	LastError *string `json:"last_error"`
+	// ConfigWithheld lists the fields that keep the config from being
+	// sent; null when it is sent.
+	ConfigWithheld []string `json:"config_withheld"`
+	// note explains a host that isn't enrolled, for the text output.
+	note string
 }
 
 type jobStatus struct {
@@ -181,19 +205,35 @@ func buildStatus(cfg *config.Config, st *state.State, now time.Time, only string
 		FormatVersion: statusFormatVersion,
 		GeneratedAt:   utc(now),
 		LastTick:      utcPtr(st.LastTick),
-		Jobs:          []jobStatus{},
 	}
-
 	var names []string
 	if only != "" {
 		names = []string{only}
 	} else {
-		for name := range cfg.Backups {
-			names = append(names, name)
-		}
-		sort.Strings(names)
+		names = jobNames(cfg)
 	}
+	jobs, err := buildJobStatuses(cfg, st, now, names, jobDetail{runs: only != "", snapshots: only != ""}, held, snapshots)
+	report.Jobs = jobs
+	return report, err
+}
 
+// jobNames is every job in the config, sorted.
+func jobNames(cfg *config.Config) []string {
+	names := make([]string, 0, len(cfg.Backups))
+	for name := range cfg.Backups {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	return names
+}
+
+// jobDetail is what a job's report includes beyond the summary: its
+// recorded runs, and the snapshots in each of its lists.
+type jobDetail struct{ runs, snapshots bool }
+
+// buildJobStatuses reports on each named job.
+func buildJobStatuses(cfg *config.Config, st *state.State, now time.Time, names []string, detail jobDetail, held func(job string) (bool, error), snapshots func(job string) (map[string]state.SnapshotList, error)) ([]jobStatus, error) {
+	jobs := []jobStatus{}
 	for _, name := range names {
 		js := st.Jobs[name]
 		job := jobStatus{Name: name, Repositories: []string{}}
@@ -203,23 +243,23 @@ func buildStatus(cfg *config.Config, st *state.State, now time.Time, only string
 
 		sched, err := cfg.EffectiveSchedule(name)
 		if err != nil {
-			return statusReport{}, err
+			return nil, err
 		}
 		job.Schedule = sched
 		if job.Due, err = schedule.Due(sched, js.LastRun, now); err != nil {
-			return statusReport{}, fmt.Errorf("job %q: %w", name, err)
+			return nil, fmt.Errorf("job %q: %w", name, err)
 		}
 		if !js.LastRun.IsZero() {
 			next, err := schedule.Next(sched, js.LastRun)
 			if err != nil {
-				return statusReport{}, fmt.Errorf("job %q: %w", name, err)
+				return nil, fmt.Errorf("job %q: %w", name, err)
 			}
 			job.NextDue = utcPtr(&next)
 		}
 
 		isHeld, err := held(name)
 		if err != nil {
-			return statusReport{}, fmt.Errorf("job %q: %w", name, err)
+			return nil, fmt.Errorf("job %q: %w", name, err)
 		}
 		switch {
 		case isHeld && js.Running != nil:
@@ -239,18 +279,18 @@ func buildStatus(cfg *config.Config, st *state.State, now time.Time, only string
 				job.FailingSince = utcPtr(&js.LastRun)
 			}
 		}
-		if only != "" {
+		if detail.runs {
 			job.Runs = runs
 		}
 
 		lists, err := snapshots(name)
 		if err != nil {
-			return statusReport{}, fmt.Errorf("job %q: %w", name, err)
+			return nil, fmt.Errorf("job %q: %w", name, err)
 		}
-		job.SnapshotLists = snapshotListStatuses(job.Repositories, lists, only != "")
-		report.Jobs = append(report.Jobs, job)
+		job.SnapshotLists = snapshotListStatuses(job.Repositories, lists, detail.snapshots)
+		jobs = append(jobs, job)
 	}
-	return report, nil
+	return jobs, nil
 }
 
 // runStatuses returns a job's recorded runs, newest first, never nil. A
@@ -359,6 +399,9 @@ func writeStatus(w io.Writer, r statusReport, p color.Painter, loc *time.Locatio
 		fmt.Fprintln(w, "last tick: never")
 	} else {
 		fmt.Fprintln(w, "last tick:", ago(now.Sub(*r.LastTick)))
+	}
+	if r.Checkin != nil {
+		writeCheckin(w, *r.Checkin, now, p)
 	}
 	fmt.Fprintln(w)
 

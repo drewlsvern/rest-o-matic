@@ -1,0 +1,40 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/drewlsvern/rest-o-matic/contract/checkin/v1/enrol-response.schema.json",
+  "title": "Enrol reply",
+  "description": "200 reply to POST /api/v1/enrol",
+  "type": "object",
+  "required": [
+    "format_version",
+    "host_id",
+    "host_name",
+    "credential",
+    "recovery_recipients"
+  ],
+  "properties": {
+    "format_version": {
+      "const": 1
+    },
+    "host_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "host_name": {
+      "type": "string",
+      "minLength": 1
+    },
+    "credential": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Sent as `Authorization: Bearer <credential>` on every check-in. Opaque to the host."
+    },
+    "recovery_recipients": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "pattern": "^age1[0-9a-z]+$"
+      },
+      "description": "Recovery public keys offered to the host. Each is added only once the user confirms it."
+    }
+  }
+}

@@ -1,0 +1,6 @@
+{
+  "error": {
+    "code": "token_rejected",
+    "message": "The enrolment token is unknown, already used or expired."
+  }
+}

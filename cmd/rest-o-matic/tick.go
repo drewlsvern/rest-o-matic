@@ -25,7 +25,11 @@ var tickCmd = &cobra.Command{
 daemon and does not write to the system crontab. Wire up one external
 periodic trigger (cron, launchd, etc.) to invoke "rest-o-matic tick"
 repeatedly; each invocation decides for itself which jobs are due and exits
-once they've all finished.`,
+once they've all finished.
+
+On a host enrolled with a central app (see enrol), each tick first reports
+to it. That takes at most a few seconds, and never changes which jobs run
+or the tick's exit status.`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		cfg, err := loadAndValidate()
 		if err != nil {
@@ -42,6 +46,10 @@ once they've all finished.`,
 		if err := store.RecordTick(now); err != nil {
 			fmt.Fprintf(os.Stderr, "%s tick time could not be saved: %v\n", color.Stderr.Warn("warning:"), err)
 		}
+		// Before any job starts, so the central app hears from the host
+		// even while a long job holds up this tick. It is time-limited and
+		// can't change the tick's outcome.
+		checkInFromTick(cfg, store)
 		st, err := store.Load()
 		if err != nil {
 			return fmt.Errorf("loading state: %w", err)

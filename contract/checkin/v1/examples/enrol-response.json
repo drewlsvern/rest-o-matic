@@ -1,0 +1,9 @@
+{
+  "format_version": 1,
+  "host_id": "8f2c6d1e-41b7-4c9a-9f0e-2b5d7a3c1e90",
+  "host_name": "prd-podman-01",
+  "credential": "rom1_Zt8Qw3nVb6Jx2Lp9Rk4Hs7Df",
+  "recovery_recipients": [
+    "age1lggyhqrw2nlhcxprm67z43rta597azn8gknawjehu9d9dl0jq3yqqvfafg"
+  ]
+}

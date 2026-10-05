@@ -80,3 +80,40 @@ backups:
 		})
 	}
 }
+
+func TestPlainTextSecrets(t *testing.T) {
+	locked := lockedValue(t)
+	cfg, err := Load(writeTempConfig(t, `
+repositories:
+  all-locked:
+    backend: s3
+    url: "s3:https://s3.example.com/b/r"
+    password: !locked "`+locked+`"
+    env:
+      AWS_ACCESS_KEY_ID: !locked "`+locked+`"
+      AWS_DEFAULT_REGION: eu-west-1
+      RESTIC_COMPRESSION: max
+      MY_PREFIX: !plain "host-a/"
+  from-file: {backend: local, url: /srv/a, password_file: /etc/restic-pw}
+  from-command: {backend: local, url: /srv/b, password_command: "pass show restic"}
+  nas:
+    backend: local
+    url: /srv/nas
+    password: correct-horse
+  offsite:
+    backend: s3
+    url: "s3:https://s3.example.com/b/r2"
+    password: !locked "`+locked+`"
+    env:
+      MY_STORAGE_TOKEN: abc
+      AWS_ACCESS_KEY_ID: AKIAEXAMPLE
+`+lockedConfigRest))
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	got := strings.Join(PlainTextSecrets(cfg), " ")
+	want := "repositories.nas.password repositories.offsite.env.AWS_ACCESS_KEY_ID repositories.offsite.env.MY_STORAGE_TOKEN"
+	if got != want {
+		t.Errorf("got %s\nwant %s", got, want)
+	}
+}

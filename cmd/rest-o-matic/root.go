@@ -55,7 +55,7 @@ func init() {
 	rootCmd.PersistentFlags().StringVar(&stateDir, "state-dir", ".rest-o-matic", "directory for state and lock files")
 	rootCmd.PersistentFlags().StringVar(&keyFile, "key-file", "", "host key for locked config values (default: host.key in your user config directory)")
 	rootCmd.PersistentFlags().StringVar(&colorMode, "color", "auto", "colour status output: auto, always, or never")
-	rootCmd.AddCommand(validateCmd, runCmd, tickCmd, statusCmd, execCmd, secretCmd)
+	rootCmd.AddCommand(validateCmd, runCmd, tickCmd, statusCmd, execCmd, secretCmd, enrolCmd, unenrolCmd, checkinCmd)
 }
 
 // keyPath is where the host key is: --key-file, or the default location.

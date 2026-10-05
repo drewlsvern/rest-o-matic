@@ -10,6 +10,9 @@
 | `rest-o-matic status [job]` | Shows each job's last run, outcome and next due time; with a job name, its recent runs |
 | `rest-o-matic exec <repository> -- <restic args>` | Runs a restic command against a configured repository |
 | `rest-o-matic secret <keygen\|public-key\|lock\|reveal\|check\|relock>` | Manages locked config values |
+| `rest-o-matic enrol <url>` | Connects this host to the [central app](central-app.md); `enroll` works too |
+| `rest-o-matic unenrol` | Disconnects it again, keeping the host key |
+| `rest-o-matic checkin [--print]` | Reports to the central app now, or prints what it would send |
 | `rest-o-matic completion <shell>` | Prints a shell completion script |
 | `rest-o-matic --version` | Prints the version and build details |
 
@@ -36,6 +39,8 @@ For anything scheduled, give `--state-dir` as an absolute path.
 | `status` | It could not report (invalid config, unreadable state). The health of the jobs does not affect it |
 | `exec` | restic's own exit code, or 20 to 23 when rest-o-matic refused to run it (see [Running restic commands](restic-commands.md#exit-codes)) |
 | `secret check` | A locked value cannot be unlocked on this host |
+| `enrol` | Enrolment failed, or the host is already enrolled and `--force` wasn't given. Not adding an offered recovery key is not a failure |
+| `checkin` | The check-in failed, or the host isn't enrolled for this config. A failed check-in never changes `tick`'s exit status |
 | `secret relock` | A locked value cannot be opened, or there is no host key. The config is then left unchanged |
 
 ## Output colours

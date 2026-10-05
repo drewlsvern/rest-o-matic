@@ -1,0 +1,468 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/drewlsvern/rest-o-matic/contract/checkin/v1/checkin-request.schema.json",
+  "title": "Check-in request",
+  "description": "POST /api/v1/checkin, with `Authorization: Bearer <credential>`",
+  "type": "object",
+  "required": [
+    "format_version",
+    "host_id",
+    "sent_at",
+    "host",
+    "parts"
+  ],
+  "properties": {
+    "format_version": {
+      "const": 1
+    },
+    "host_id": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "null only in the output of `checkin --print` on a host that is not enrolled; never sent"
+    },
+    "sent_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "host": {
+      "$ref": "enrol-request.schema.json#/$defs/host"
+    },
+    "parts": {
+      "type": "object",
+      "required": [
+        "status",
+        "snapshots",
+        "config"
+      ],
+      "properties": {
+        "status": {
+          "type": "object",
+          "required": [
+            "fingerprint",
+            "content"
+          ],
+          "properties": {
+            "fingerprint": {
+              "$ref": "#/$defs/fingerprint"
+            },
+            "content": {
+              "oneOf": [
+                {
+                  "type": "null"
+                },
+                {
+                  "type": "object",
+                  "required": [
+                    "jobs"
+                  ],
+                  "properties": {
+                    "jobs": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/$defs/job"
+                      }
+                    }
+                  }
+                }
+              ]
+            }
+          },
+          "description": "Every job's state and recorded runs"
+        },
+        "snapshots": {
+          "type": "object",
+          "required": [
+            "fingerprint",
+            "content"
+          ],
+          "properties": {
+            "fingerprint": {
+              "$ref": "#/$defs/fingerprint"
+            },
+            "content": {
+              "oneOf": [
+                {
+                  "type": "null"
+                },
+                {
+                  "type": "object",
+                  "required": [
+                    "jobs"
+                  ],
+                  "properties": {
+                    "jobs": {
+                      "type": "object",
+                      "description": "Keyed by job name",
+                      "additionalProperties": {
+                        "type": "object",
+                        "description": "Keyed by repository name; only repositories with a recorded list",
+                        "additionalProperties": {
+                          "type": "object",
+                          "required": [
+                            "listed_at",
+                            "snapshots"
+                          ],
+                          "properties": {
+                            "listed_at": {
+                              "type": "string",
+                              "format": "date-time"
+                            },
+                            "snapshots": {
+                              "type": "array",
+                              "items": {
+                                "$ref": "#/$defs/snapshot"
+                              },
+                              "description": "Newest first"
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              ]
+            }
+          },
+          "description": "Every job's recorded snapshot lists"
+        },
+        "config": {
+          "type": "object",
+          "required": [
+            "fingerprint",
+            "content",
+            "withheld"
+          ],
+          "description": "The config file. content is its exact text; withheld is set, and content null, while it holds plain-text secrets.",
+          "properties": {
+            "fingerprint": {
+              "$ref": "#/$defs/fingerprint"
+            },
+            "content": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "withheld": {
+              "oneOf": [
+                {
+                  "type": "null"
+                },
+                {
+                  "type": "object",
+                  "required": [
+                    "reason",
+                    "fields"
+                  ],
+                  "properties": {
+                    "reason": {
+                      "type": "string",
+                      "description": "plain_text_secrets"
+                    },
+                    "fields": {
+                      "type": "array",
+                      "minItems": 1,
+                      "items": {
+                        "type": "string"
+                      },
+                      "description": "Each field holding a plain-text secret, as a dotted path such as repositories.nas.password"
+                    }
+                  }
+                }
+              ]
+            }
+          }
+        }
+      }
+    }
+  },
+  "$defs": {
+    "fingerprint": {
+      "type": "string",
+      "pattern": "^sha256:[0-9a-f]{64}$"
+    },
+    "job": {
+      "type": "object",
+      "required": [
+        "name",
+        "schedule",
+        "repositories",
+        "due",
+        "next_due",
+        "waiting",
+        "running",
+        "last_run",
+        "failing_since",
+        "runs",
+        "snapshot_lists"
+      ],
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "schedule": {
+          "type": "string"
+        },
+        "repositories": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "due": {
+          "type": "boolean"
+        },
+        "next_due": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "format": "date-time"
+        },
+        "waiting": {
+          "type": "boolean"
+        },
+        "running": {
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "type": "object",
+              "required": [
+                "started",
+                "trigger"
+              ],
+              "properties": {
+                "started": {
+                  "type": "string",
+                  "format": "date-time"
+                },
+                "trigger": {
+                  "type": "string"
+                }
+              }
+            }
+          ]
+        },
+        "last_run": {
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "$ref": "#/$defs/run"
+            }
+          ]
+        },
+        "failing_since": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "format": "date-time"
+        },
+        "runs": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/run"
+          },
+          "description": "Newest first, at most 20"
+        },
+        "snapshot_lists": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": [
+              "repository",
+              "listed_at",
+              "count",
+              "newest"
+            ],
+            "properties": {
+              "repository": {
+                "type": "string"
+              },
+              "listed_at": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "format": "date-time"
+              },
+              "count": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "newest": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "format": "date-time"
+              }
+            }
+          }
+        }
+      }
+    },
+    "run": {
+      "type": "object",
+      "required": [
+        "started",
+        "finished",
+        "outcome",
+        "trigger",
+        "error",
+        "repositories"
+      ],
+      "properties": {
+        "started": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "format": "date-time"
+        },
+        "finished": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "outcome": {
+          "enum": [
+            "success",
+            "failed"
+          ]
+        },
+        "trigger": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "tick or run; null for a record from before this was kept"
+        },
+        "error": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "repositories": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": [
+              "name",
+              "result",
+              "error",
+              "snapshot_id"
+            ],
+            "properties": {
+              "name": {
+                "type": "string"
+              },
+              "result": {
+                "type": "string",
+                "description": "ok, backup_failed or forget_failed"
+              },
+              "error": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "snapshot_id": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
+    "snapshot": {
+      "type": "object",
+      "required": [
+        "id",
+        "short_id",
+        "time",
+        "hostname",
+        "paths",
+        "tags",
+        "size",
+        "files",
+        "files_new",
+        "files_changed",
+        "data_added",
+        "data_added_packed"
+      ],
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "short_id": {
+          "type": "string"
+        },
+        "time": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "hostname": {
+          "type": "string"
+        },
+        "paths": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "tags": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "size": {
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "files": {
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "files_new": {
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "files_changed": {
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "data_added": {
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "data_added_packed": {
+          "type": [
+            "integer",
+            "null"
+          ]
+        }
+      }
+    }
+  }
+}
