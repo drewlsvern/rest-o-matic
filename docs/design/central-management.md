@@ -105,8 +105,15 @@ Rules:
 
 ## Report
 
-A report is a full picture of the host's current state, not a stream of
-events. If the central app misses reports, the next one brings it fully up
+Every check-in is a heartbeat: the host's identity, versions, and a
+fingerprint of each part of its state (status, snapshot lists, config). A
+part is sent in full only when its fingerprint has changed since the central
+app last acknowledged it, or when the central app asks for it again. A quiet
+minute costs a few hundred bytes. The exact messages are in the
+`enrolment-and-checkin` change and, once built, in `contract/checkin/v1/`.
+
+Taken together, the parts are a full picture of the host's current state,
+not a stream of events. If the central app misses reports, the next one brings it fully up
 to date and nothing needs to be queued or replayed.
 
 Contents:
@@ -374,6 +381,8 @@ repositories:
 - **Enrolling a host with an existing config rewrites its secrets in
   place**, locking the plain-text values before the file is uploaded. That
   edit must leave comments and YAML anchors intact.
+- **The config is uploaded only when every secret in it is locked.** Until
+  then the check-in withholds it and says which fields are in plain text.
 - **Two helper commands** work on the host with the central app down: one
   locks a value to paste into the config, and one reveals a locked value
   using the host's own key, for running plain restic by hand.
@@ -615,6 +624,11 @@ the central app's repository.
 - **Signed config.** Hosts applying only config signed by a key that is not
   on the central app, which would remove the central app from the trusted
   set.
+- **Enrolment started from the host.** Running `enrol` on a host first and
+  approving it in the UI. Enrolment starts in the UI for now, so the
+  enrolment endpoint never accepts anything from an unidentified machine.
+- **Locked values in hook commands.** A token inside a hook (a healthcheck
+  URL, say) is uploaded in plain text with the config.
 
 ## Decision log
 
@@ -652,6 +666,16 @@ the central app's repository.
   and caching it centrally; restoring from that view is the follow-on.
 - File listings are stored encrypted for a viewer key, whose private half
   is unlocked on the server by the user's password at sign-in.
+- Enrolment starts in the UI with a one-time token, which may be pasted as
+  part of a command.
+- Every check-in is a heartbeat; status, snapshot lists and config are sent
+  only when changed or asked for.
+- The config is uploaded from this step on, but only while all its secrets
+  are locked. A short fixed list of harmless `env` settings (region,
+  restic's tuning) may stay plain; any other name counts as a secret.
+- Secrets stay write-only: the central app can replace a locked value but
+  never read it. Confirmed again on 2026-10-03.
+- When a host counts as overdue is decided on the central app's side.
 - The work is split into separate changes, written one at a time.
 
 ### Accepted as proposed

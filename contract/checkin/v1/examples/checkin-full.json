@@ -1,0 +1,110 @@
+{
+  "format_version": 1,
+  "host_id": "8f2c6d1e-41b7-4c9a-9f0e-2b5d7a3c1e90",
+  "sent_at": "2026-10-03T09:02:00Z",
+  "host": {
+    "hostname": "prd-podman-01",
+    "os": "linux",
+    "arch": "amd64",
+    "rest_o_matic_version": "v0.2.0",
+    "restic_version": "0.17.3"
+  },
+  "parts": {
+    "status": {
+      "fingerprint": "sha256:7366b4e88dc6e2b38141744b382d8e83268327e4ffb8d1afa904d07608da21af",
+      "content": {
+        "jobs": [
+          {
+            "name": "gitea",
+            "schedule": "hourly",
+            "repositories": [
+              "offsite"
+            ],
+            "due": false,
+            "next_due": "2026-10-03T10:00:00Z",
+            "waiting": false,
+            "running": null,
+            "last_run": {
+              "started": "2026-10-03T09:00:02Z",
+              "finished": "2026-10-03T09:01:47Z",
+              "outcome": "success",
+              "trigger": "tick",
+              "error": null,
+              "repositories": [
+                {
+                  "name": "offsite",
+                  "result": "ok",
+                  "error": null,
+                  "snapshot_id": "4f1a9c2b7e3d5a8c0b6f9e2d1c4a7b3e5f8d0c2a9b6e1f4d7c3a5b8e0f2d9c6a"
+                }
+              ]
+            },
+            "failing_since": null,
+            "runs": [
+              {
+                "started": "2026-10-03T09:00:02Z",
+                "finished": "2026-10-03T09:01:47Z",
+                "outcome": "success",
+                "trigger": "tick",
+                "error": null,
+                "repositories": [
+                  {
+                    "name": "offsite",
+                    "result": "ok",
+                    "error": null,
+                    "snapshot_id": "4f1a9c2b7e3d5a8c0b6f9e2d1c4a7b3e5f8d0c2a9b6e1f4d7c3a5b8e0f2d9c6a"
+                  }
+                ]
+              }
+            ],
+            "snapshot_lists": [
+              {
+                "repository": "offsite",
+                "listed_at": "2026-10-03T09:01:47Z",
+                "count": 1,
+                "newest": "2026-10-03T09:00:05Z"
+              }
+            ]
+          }
+        ]
+      }
+    },
+    "snapshots": {
+      "fingerprint": "sha256:34864f90ab43e6f4d724cda239ddaaec8384ef2732ef0ab74c590037c83434f6",
+      "content": {
+        "jobs": {
+          "gitea": {
+            "offsite": {
+              "listed_at": "2026-10-03T09:01:47Z",
+              "snapshots": [
+                {
+                  "id": "4f1a9c2b7e3d5a8c0b6f9e2d1c4a7b3e5f8d0c2a9b6e1f4d7c3a5b8e0f2d9c6a",
+                  "short_id": "4f1a9c2b",
+                  "time": "2026-10-03T09:00:05Z",
+                  "hostname": "prd-podman-01",
+                  "paths": [
+                    "/home/podman-runner/staging/gitea"
+                  ],
+                  "tags": [
+                    "gitea"
+                  ],
+                  "size": 3221225472,
+                  "files": 18234,
+                  "files_new": 12,
+                  "files_changed": 40,
+                  "data_added": 5242880,
+                  "data_added_packed": 2097152
+                }
+              ]
+            }
+          }
+        }
+      }
+    },
+    "config": {
+      "fingerprint": "sha256:4c60bbcc82da6dc7e41ef7eea5255129d7a6226fe98b2c04938262d9af585956",
+      "content": "# rest-o-matic on prd-podman-01\nrepositories:\n  offsite:\n    backend: s3\n    url: \"s3:https://s3.example.com/backups/prd-podman-01\"\n    password: !locked \"YWdlLWVuY3J5cHRpb24ub3JnL3YxCi0+IFgyNTUxOSBleGFtcGxl\"\n    env:\n      AWS_DEFAULT_REGION: eu-west-1\n      AWS_ACCESS_KEY_ID: !locked \"YWdlLWVuY3J5cHRpb24ub3JnL3YxCi0+IFgyNTUxOSBrZXlpZA\"\n      AWS_SECRET_ACCESS_KEY: !locked \"YWdlLWVuY3J5cHRpb24ub3JnL3YxCi0+IFgyNTUxOSBzZWNyZXQ\"\npolicies:\n  hourly: {schedule: hourly, retention: {hourly: 24, daily: 7}}\nbackups:\n  gitea:\n    source: {paths: [\"/home/podman-runner/staging/gitea\"]}\n    policy: hourly\n    repositories: [offsite]\n",
+      "withheld": null
+    }
+  }
+}

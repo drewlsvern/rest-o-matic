@@ -1,0 +1,66 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/drewlsvern/rest-o-matic/contract/checkin/v1/enrol-request.schema.json",
+  "title": "Enrol request",
+  "description": "POST /api/v1/enrol",
+  "type": "object",
+  "required": [
+    "format_version",
+    "token",
+    "public_key",
+    "host"
+  ],
+  "properties": {
+    "format_version": {
+      "const": 1
+    },
+    "token": {
+      "type": "string",
+      "minLength": 1,
+      "description": "The one-time enrolment token from the central app"
+    },
+    "public_key": {
+      "type": "string",
+      "pattern": "^age1[0-9a-z]+$",
+      "description": "The host's age public key, which values are locked for"
+    },
+    "host": {
+      "$ref": "#/$defs/host"
+    }
+  },
+  "$defs": {
+    "host": {
+      "type": "object",
+      "required": [
+        "hostname",
+        "os",
+        "arch",
+        "rest_o_matic_version",
+        "restic_version"
+      ],
+      "properties": {
+        "hostname": {
+          "type": "string"
+        },
+        "os": {
+          "type": "string",
+          "description": "Go's GOOS: linux, darwin, windows, ..."
+        },
+        "arch": {
+          "type": "string",
+          "description": "Go's GOARCH: amd64, arm64, ..."
+        },
+        "rest_o_matic_version": {
+          "type": "string"
+        },
+        "restic_version": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "restic's version, such as 0.17.3; null when restic can't be found or run"
+        }
+      }
+    }
+  }
+}

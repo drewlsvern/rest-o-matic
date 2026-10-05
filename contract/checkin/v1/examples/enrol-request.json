@@ -1,0 +1,12 @@
+{
+  "format_version": 1,
+  "token": "7GxK2mPq9sVw4tYb",
+  "public_key": "age1ql3z7hjy54pw3hyww5ayyfg7zqgvc7w3j2elw8zmrj2kg5sfn9aqmcac8p",
+  "host": {
+    "hostname": "prd-podman-01",
+    "os": "linux",
+    "arch": "amd64",
+    "rest_o_matic_version": "v0.2.0",
+    "restic_version": "0.17.3"
+  }
+}

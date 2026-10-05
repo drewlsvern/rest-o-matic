@@ -88,6 +88,46 @@ type State struct {
 	// LastTick is when `tick` last got as far as evaluating schedules.
 	LastTick *time.Time          `json:"last_tick,omitempty"`
 	Jobs     map[string]JobState `json:"jobs"`
+	// Checkin is what is known about check-ins with the central app; nil
+	// before the first.
+	Checkin *CheckinState `json:"checkin,omitempty"`
+	// Restic caches restic's version, which every check-in reports.
+	Restic *ResticVersion `json:"restic,omitempty"`
+}
+
+// CheckinState is the record of check-ins for one enrolment.
+type CheckinState struct {
+	// HostID is the enrolment this record belongs to. A record for another
+	// host ID is from an earlier enrolment and counts for nothing.
+	HostID      string     `json:"host_id"`
+	LastAttempt *time.Time `json:"last_attempt,omitempty"`
+	LastSuccess *time.Time `json:"last_success,omitempty"`
+	// LastError is why the most recent attempt failed; empty when it
+	// succeeded.
+	LastError string `json:"last_error,omitempty"`
+	// Acknowledged is the fingerprint the central app last received of
+	// each part, by part name.
+	Acknowledged map[string]string `json:"acknowledged,omitempty"`
+	// Resend lists parts the central app asked to receive in full again.
+	Resend []string `json:"resend,omitempty"`
+}
+
+// CheckinFor returns the check-in record for the enrolment with hostID,
+// or an empty one if there is none yet.
+func (st *State) CheckinFor(hostID string) CheckinState {
+	if st.Checkin == nil || st.Checkin.HostID != hostID {
+		return CheckinState{HostID: hostID}
+	}
+	return *st.Checkin
+}
+
+// ResticVersion is restic's version, together with what identifies the
+// binary it was read from, so it is read again only when restic changes.
+type ResticVersion struct {
+	Path    string    `json:"path"`
+	Size    int64     `json:"size"`
+	ModTime time.Time `json:"mod_time"`
+	Version string    `json:"version"`
 }
 
 // Store reads and writes the state file. Every write is a read-modify-write
@@ -186,6 +226,44 @@ func (s *Store) ClearRunning(jobName string) error {
 func (s *Store) RecordTick(t time.Time) error {
 	return s.update(func(st *State) bool {
 		st.LastTick = &t
+		return true
+	})
+}
+
+// RecordCheckin records a check-in attempt at at for the enrolment with
+// hostID. On success (err nil) every part in sent is recorded as
+// acknowledged with its fingerprint, and resend replaces the parts the
+// central app wants again; on failure only the error is recorded, so the
+// same parts are sent next time. It reports whether the attempt before
+// this one had failed.
+func (s *Store) RecordCheckin(hostID string, at time.Time, sent map[string]string, resend []string, err error) (wasFailing bool, _ error) {
+	updateErr := s.update(func(st *State) bool {
+		c := st.CheckinFor(hostID)
+		wasFailing = c.LastError != ""
+		c.LastAttempt = &at
+		if err != nil {
+			c.LastError = err.Error()
+		} else {
+			c.LastSuccess, c.LastError = &at, ""
+			acked := map[string]string{}
+			for part, fp := range c.Acknowledged {
+				acked[part] = fp
+			}
+			for part, fp := range sent {
+				acked[part] = fp
+			}
+			c.Acknowledged, c.Resend = acked, resend
+		}
+		st.Checkin = &c
+		return true
+	})
+	return wasFailing, updateErr
+}
+
+// RecordResticVersion caches restic's version.
+func (s *Store) RecordResticVersion(v ResticVersion) error {
+	return s.update(func(st *State) bool {
+		st.Restic = &v
 		return true
 	})
 }

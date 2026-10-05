@@ -139,6 +139,7 @@ config in plain text.
 | `status [job]` | Shows each job's last run, outcome and next due time |
 | `exec <repository> -- ...` | Runs any restic command against a repository |
 | `secret ...` | Creates the host key, and locks, reveals and re-locks config values |
+| `enrol <url>`, `unenrol`, `checkin` | Connects the host to the central app, and reports to it |
 
 The full list of flags and exit codes is in the
 [command reference](docs/cli.md).
@@ -153,6 +154,7 @@ The full list of flags and exit codes is in the
 | [Status](docs/status.md) | Reading `status`, its JSON output |
 | [Notifications](docs/notifications.md) | Being told when a job fails and when it recovers |
 | [Secrets](docs/secrets.md) | Storing passwords and credentials encrypted |
+| [Connecting to the central app](docs/central-app.md) | Enrolling a host, what it reports and when, withheld configs |
 | [Backing up container data](docs/containers.md) | Rootless Podman, rootful Docker, restoring |
 | [Concurrency and the state directory](docs/concurrency.md) | What runs at the same time, waiting, one user per state directory |
 | [Running restic commands](docs/restic-commands.md) | `exec`, initialising, restoring, its safeguards and exit codes |
@@ -169,6 +171,8 @@ option, commented.
   [Backing up container data](docs/containers.md)).
 - Built-in stopping and starting of containers (use hooks), named volumes,
   and rootless Docker.
+- The central app that `enrol` connects to. It is a separate project and
+  not released yet; until then, only the host's side exists.
 - Setting up your scheduler for you. rest-o-matic never writes a crontab
   entry or a systemd unit; the docs show working examples.
 
