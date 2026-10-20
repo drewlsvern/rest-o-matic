@@ -20,12 +20,12 @@
 
 ## 4. Windows
 
-- [ ] 4.1 On the Windows CI job, back up a temporary directory with an absolute exclude written with backslashes (the form `~` expansion produces) and with forward slashes, and record which restic honours
-- [ ] 4.2 If backslash patterns are not honoured, convert separators in expanded patterns on Windows in `Load`, and keep the test as a regression check. Either way, note the result in `docs/configuration.md`
+- [x] 4.1 On the Windows CI job, back up a temporary directory with an absolute exclude written with backslashes (the form `~` expansion produces) and with forward slashes, and record which restic honours. Result (restic 0.19.1 on windows-latest, PR #31): both forms are honoured
+- [x] 4.2 If backslash patterns are not honoured, convert separators in expanded patterns on Windows in `Load`, and keep the test as a regression check. Either way, note the result in `docs/configuration.md`. Not needed: backslash patterns work, so no conversion was added; the docs say both forms work
 
 ## 5. Docs and Verification
 
 - [x] 5.1 `docs/configuration.md`: a "Leaving things out" section covering the three keys, restic's pattern rules (anchored, bare names match anywhere, `**`), `~` expansion including `~$*`, what each flag skips, the validation warnings, and that excludes don't break parent-snapshot reuse
 - [x] 5.2 `rest-o-matic.example.yaml`: an `exclude` example in the commented `source` section
 - [x] 5.3 UI repo handoff: the new `source` keys arrive through `rest-o-matic schema`, and the check-in contract is unchanged
-- [ ] 5.4 `go test ./...` and `go vet ./...` pass locally, and CI (including the Windows job) is green
+- [x] 5.4 `go test ./...` and `go vet ./...` pass locally, and CI (including the Windows job) is green
