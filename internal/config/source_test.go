@@ -55,7 +55,7 @@ func TestSource_ExclusionsWithoutPathsRejected(t *testing.T) {
 
 func TestSource_OtherTypesStillRejected(t *testing.T) {
 	for source, want := range map[string]string{
-		`{paths: [/a], container: x}`: "unsupported source type(s) [container]",
+		`{paths: [/a], container: x}`: "unknown key(s) [container]; a source takes paths, with optional exclude, exclude_caches, one_file_system (other source types such as container are not supported yet)",
 		`{paths: [/a], exlude: [x]}`:  `did you mean "exclude"?`,
 	} {
 		_, err := Load(writeTempConfig(t, sourceConfig(source)))

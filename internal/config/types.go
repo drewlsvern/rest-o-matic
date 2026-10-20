@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"slices"
 	"sort"
+	"strings"
 
 	"gopkg.in/yaml.v3"
 
@@ -150,8 +151,8 @@ type Source struct {
 
 // sourceTypes are the keys that say what kind of source a job has;
 // sourceModifiers are the keys that narrow it. Any other key under
-// `source` is reported as an unsupported source type, so that a source
-// type from a later version is refused rather than silently ignored.
+// `source` is an error, so that a source type from a later version (or a
+// misspelt modifier) is refused rather than silently ignored.
 var (
 	sourceTypes     = []string{"paths"}
 	sourceModifiers = []string{"exclude", "exclude_caches", "one_file_system"}
@@ -182,7 +183,8 @@ func (s *Source) UnmarshalYAML(value *yaml.Node) error {
 			hint = didYouMean(unsupported[0], append(slices.Clone(sourceTypes), sourceModifiers...)...)
 		}
 		sort.Strings(unsupported)
-		return fmt.Errorf("line %d: source: unsupported source type(s) %v; only 'paths' is supported in this version%s", line, unsupported, hint)
+		return fmt.Errorf("line %d: source: unknown key(s) %v; a source takes %s, with optional %s (other source types such as container are not supported yet)%s",
+			line, unsupported, strings.Join(sourceTypes, ", "), strings.Join(sourceModifiers, ", "), hint)
 	}
 
 	if pathsNode, ok := raw["paths"]; ok {
