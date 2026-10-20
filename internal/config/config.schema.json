@@ -181,6 +181,21 @@
                 "type": "string"
               },
               "description": "Files and directories to back up. A leading ~ is your home directory."
+            },
+            "exclude": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "description": "restic exclude patterns: a pattern starting with / matches from the root, one without matches at any depth (a bare name matches every file or directory with that name), and ** matches any number of directories. A leading ~ is your home directory."
+            },
+            "exclude_caches": {
+              "type": "boolean",
+              "description": "Leave out the contents of directories marked with a valid CACHEDIR.TAG file. Off by default."
+            },
+            "one_file_system": {
+              "type": "boolean",
+              "description": "Don't cross into other filesystems mounted under a source path. Off by default."
             }
           }
         },

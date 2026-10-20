@@ -168,14 +168,24 @@ func parseSnapshotID(output []byte) string {
 	return ""
 }
 
-// Backup runs `restic backup` against repo for the given paths, tagging the
-// resulting snapshot with every tag supplied (the caller is responsible for
-// including the automatic job-name tag alongside any user tags). restic's
+// Backup runs `restic backup` against repo for the given source's paths,
+// leaving out what its exclusions match, and tags the resulting snapshot
+// with every tag supplied (the caller is responsible for including the
+// automatic job-name tag alongside any user tags). restic's
 // own stderr output is preserved on failure per the design's "surface
 // restic's errors, don't reinterpret them" decision.
-func (r *ResticRunner) Backup(ctx context.Context, repo config.Repository, mode string, paths []string, tags []string) (snapshotID string, err error) {
+func (r *ResticRunner) Backup(ctx context.Context, repo config.Repository, mode string, src config.Source, tags []string) (snapshotID string, err error) {
 	args := []string{"-r", repo.URL, "backup"}
-	args = append(args, paths...)
+	args = append(args, src.Paths...)
+	for _, p := range src.Exclude {
+		args = append(args, "--exclude", p)
+	}
+	if src.ExcludeCaches {
+		args = append(args, "--exclude-caches")
+	}
+	if src.OneFileSystem {
+		args = append(args, "--one-file-system")
+	}
 	for _, t := range tags {
 		args = append(args, "--tag", t)
 	}

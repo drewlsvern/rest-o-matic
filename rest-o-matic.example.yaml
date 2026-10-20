@@ -132,6 +132,13 @@
 #       paths:
 #         - /home/me/documents
 #         - /home/me/photos
+#       # Optional: leave parts of the paths out. restic exclude patterns; a
+#       # leading / matches from the root, a bare name matches at any depth.
+#       exclude:
+#         - /home/me/photos/.thumbnails
+#         - "*.tmp"
+#       exclude_caches: false    # true: skip directories with a CACHEDIR.TAG
+#       one_file_system: false   # true: don't cross into other mounts
 #
 #     policy: hot
 #

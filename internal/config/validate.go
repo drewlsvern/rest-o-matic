@@ -90,6 +90,9 @@ func Validate(cfg *Config) Result {
 		if len(job.Source.Paths) == 0 {
 			res.Errors = append(res.Errors, ValidationError{Job: name, Path: at + "source.paths", Message: "source.paths must be non-empty"})
 		}
+		errs, warns := checkExcludes(name, job.Source)
+		res.Errors = append(res.Errors, errs...)
+		res.Warnings = append(res.Warnings, warns...)
 
 		if len(job.Repositories) == 0 {
 			res.Errors = append(res.Errors, ValidationError{Job: name, Path: at + "repositories", Message: "must reference at least one repository"})

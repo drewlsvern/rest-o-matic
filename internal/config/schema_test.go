@@ -100,7 +100,7 @@ func propertyNames(node map[string]any) []string {
 // customKeys are the keys of the types that decode themselves, which
 // reflection can't see, by the field type they decode into.
 var customKeys = map[reflect.Type]map[string]reflect.Type{
-	reflect.TypeOf(Source{}):        {"paths": reflect.TypeOf([]string{})},
+	reflect.TypeOf(Source{}):        {"paths": reflect.TypeOf([]string{}), "exclude": reflect.TypeOf([]string{}), "exclude_caches": reflect.TypeOf(false), "one_file_system": reflect.TypeOf(false)},
 	reflect.TypeOf(Notify{}):        {"failure": reflect.TypeOf([]string{}), "recovery": reflect.TypeOf([]string{}), "success": reflect.TypeOf([]string{})},
 	reflect.TypeOf(AfterHooks{}):    {"always": reflect.TypeOf([]string{}), "success": reflect.TypeOf([]string{}), "failure": reflect.TypeOf([]string{})},
 	reflect.TypeOf(RepositoryRef{}): {"repo": reflect.TypeOf(""), "retention": reflect.TypeOf(Retention{})},
@@ -294,6 +294,8 @@ func TestSchema_RejectsBadShapes(t *testing.T) {
 	base := "policies:\n  hot: {schedule: hourly}\nrepositories:\n  nas: {backend: local, url: /srv/nas}\n"
 	for name, content := range map[string]string{
 		"source with another key":     base + "backups:\n  docs: {source: {paths: [/a], container: x}, policy: hot, repositories: [nas]}\n",
+		"exclude not a list":          base + "backups:\n  docs: {source: {paths: [/a], exclude: Trash}, policy: hot, repositories: [nas]}\n",
+		"exclude_caches not a bool":   base + "backups:\n  docs: {source: {paths: [/a], exclude_caches: \"yes\"}, policy: hot, repositories: [nas]}\n",
 		"unknown notify kind":         "notify: {sometimes: [echo]}\n",
 		"unknown after outcome":       base + "backups:\n  docs: {source: {paths: [/a]}, policy: hot, repositories: [nas], hooks: {after: {maybe: [echo]}}}\n",
 		"repository entry, no repo":   base + "backups:\n  docs: {source: {paths: [/a]}, policy: hot, repositories: [{retention: {daily: 1}}]}\n",

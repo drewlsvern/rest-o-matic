@@ -59,6 +59,15 @@ func parse(data []byte) (*Config, *yaml.Node, error) {
 			}
 			job.Source.Paths[i] = expanded
 		}
+		// restic doesn't expand ~ in a pattern either; left alone, a
+		// ~/... pattern would quietly exclude nothing.
+		for i, p := range job.Source.Exclude {
+			expanded, err := expandHome(p)
+			if err != nil {
+				return nil, nil, fmt.Errorf("job %q: exclude pattern %q: %w", name, p, err)
+			}
+			job.Source.Exclude[i] = expanded
+		}
 		cfg.Backups[name] = job
 	}
 

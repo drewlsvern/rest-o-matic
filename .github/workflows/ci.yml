@@ -68,3 +68,18 @@ jobs:
 
       - name: Test hook runner
         run: go test ./internal/execution/
+
+      - name: Install restic
+        # Only for the exclude test below, which checks that restic honours
+        # absolute exclude patterns as rest-o-matic writes them on Windows
+        # (backslashes, from ~ expansion) and as users may (forward
+        # slashes). Installed after the hook runner step so that step's
+        # restic integration tests keep skipping, as before.
+        run: choco install restic -y --no-progress
+
+      - name: Test exclude patterns against restic
+        # `restic version` first: without restic the test would skip and
+        # pass.
+        run: |
+          restic version
+          go test ./internal/execution/ -run TestBackup_ExclusionsLeaveFilesOut -v
