@@ -4,7 +4,9 @@ package config
 
 import (
 	"fmt"
+	"slices"
 	"sort"
+	"strings"
 
 	"gopkg.in/yaml.v3"
 
@@ -136,14 +138,29 @@ func (s *Secret) UnmarshalYAML(value *yaml.Node) error {
 }
 
 // Source declares what a job backs up. In this version only a `paths`
-// source is supported; any other shape is a config error.
+// source is supported; any other shape is a config error. The other fields
+// narrow what is read from it, and are passed to restic as written (after
+// `~` expansion, for Exclude).
 type Source struct {
 	Paths []string
+
+	Exclude       []string
+	ExcludeCaches bool
+	OneFileSystem bool
 }
 
-// UnmarshalYAML enforces that a Source declares only `paths`, rejecting any
-// other source type (container, quadlet, command, ...) since those are not
-// supported yet.
+// sourceTypes are the keys that say what kind of source a job has;
+// sourceModifiers are the keys that narrow it. Any other key under
+// `source` is an error, so that a source type from a later version (or a
+// misspelt modifier) is refused rather than silently ignored.
+var (
+	sourceTypes     = []string{"paths"}
+	sourceModifiers = []string{"exclude", "exclude_caches", "one_file_system"}
+)
+
+// UnmarshalYAML enforces that a Source declares only `paths` and its
+// modifiers, rejecting any other source type (container, quadlet, command,
+// ...) since those are not supported yet.
 func (s *Source) UnmarshalYAML(value *yaml.Node) error {
 	var raw map[string]yaml.Node
 	if err := value.Decode(&raw); err != nil {
@@ -153,7 +170,7 @@ func (s *Source) UnmarshalYAML(value *yaml.Node) error {
 	var unsupported []string
 	line := value.Line
 	for i := 0; i+1 < len(value.Content); i += 2 {
-		if k := value.Content[i]; k.Value != "paths" {
+		if k := value.Content[i]; !slices.Contains(sourceTypes, k.Value) && !slices.Contains(sourceModifiers, k.Value) {
 			if len(unsupported) == 0 {
 				line = k.Line
 			}
@@ -163,10 +180,11 @@ func (s *Source) UnmarshalYAML(value *yaml.Node) error {
 	if len(unsupported) > 0 {
 		hint := ""
 		if len(unsupported) == 1 {
-			hint = didYouMean(unsupported[0], "paths")
+			hint = didYouMean(unsupported[0], append(slices.Clone(sourceTypes), sourceModifiers...)...)
 		}
 		sort.Strings(unsupported)
-		return fmt.Errorf("line %d: source: unsupported source type(s) %v; only 'paths' is supported in this version%s", line, unsupported, hint)
+		return fmt.Errorf("line %d: source: unknown key(s) %v; a source takes %s, with optional %s (other source types such as container are not supported yet)%s",
+			line, unsupported, strings.Join(sourceTypes, ", "), strings.Join(sourceModifiers, ", "), hint)
 	}
 
 	if pathsNode, ok := raw["paths"]; ok {
@@ -175,6 +193,22 @@ func (s *Source) UnmarshalYAML(value *yaml.Node) error {
 			return fmt.Errorf("source.paths: %w", err)
 		}
 		s.Paths = paths
+	}
+	if n, ok := raw["exclude"]; ok {
+		if err := n.Decode(&s.Exclude); err != nil {
+			return fmt.Errorf("line %d: source.exclude: must be a list of patterns", n.Line)
+		}
+	}
+	for _, flag := range []struct {
+		key string
+		dst *bool
+	}{{"exclude_caches", &s.ExcludeCaches}, {"one_file_system", &s.OneFileSystem}} {
+		if n, ok := raw[flag.key]; ok {
+			// Only a YAML boolean: yaml.v3 would also take `yes` or `on`.
+			if resolve(&n).ShortTag() != "!!bool" || n.Decode(flag.dst) != nil {
+				return fmt.Errorf("line %d: source.%s: must be true or false", n.Line, flag.key)
+			}
+		}
 	}
 	return nil
 }

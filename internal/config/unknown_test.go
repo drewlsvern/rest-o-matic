@@ -94,7 +94,7 @@ colour: blue
 
 func TestUnknownKeys_DecodersSuggestToo(t *testing.T) {
 	for name, c := range map[string]struct{ content, want string }{
-		"source":         {"backups:\n  docs:\n    source:\n      path: [/a]\n", `line 4: source: unsupported source type(s) [path]; only 'paths' is supported in this version; did you mean "paths"?`},
+		"source":         {"backups:\n  docs:\n    source:\n      path: [/a]\n", `line 4: source: unknown key(s) [path]; a source takes paths, with optional exclude, exclude_caches, one_file_system (other source types such as container are not supported yet); did you mean "paths"?`},
 		"notify":         {"notify:\n  failur: [echo]\n", `line 2: notify: unknown key "failur" (want failure, recovery, or success); did you mean "failure"?`},
 		"after outcomes": {"backups:\n  docs:\n    hooks:\n      after: {sucess: [echo]}\n", `did you mean "success"?`},
 	} {

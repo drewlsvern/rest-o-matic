@@ -87,7 +87,7 @@ func (f readModeFakes) backupCall(t *testing.T) string {
 
 func TestBackup_DirectRunsResticItself(t *testing.T) {
 	f := newReadModeFakes(t)
-	if _, err := f.runner().Backup(context.Background(), f.repo(), config.ReadDirect, []string{"/src"}, []string{"docs"}); err != nil {
+	if _, err := f.runner().Backup(context.Background(), f.repo(), config.ReadDirect, config.Source{Paths: []string{"/src"}}, []string{"docs"}); err != nil {
 		t.Fatalf("Backup: %v", err)
 	}
 	want := "-r " + f.repo().URL + " backup /src --tag docs --json"
@@ -101,7 +101,7 @@ func TestBackup_DirectRunsResticItself(t *testing.T) {
 
 func TestBackup_PodmanUnshareWrapsRestic(t *testing.T) {
 	f := newReadModeFakes(t)
-	id, err := f.runner().Backup(context.Background(), f.repo(), config.ReadPodmanUnshare, []string{"/src"}, []string{"gitea"})
+	id, err := f.runner().Backup(context.Background(), f.repo(), config.ReadPodmanUnshare, config.Source{Paths: []string{"/src"}}, []string{"gitea"})
 	if err != nil {
 		t.Fatalf("Backup: %v", err)
 	}
@@ -122,7 +122,7 @@ func TestBackup_PodmanUnshareWithoutPodmanFails(t *testing.T) {
 	f := newReadModeFakes(t)
 	r := f.runner()
 	r.Podman = filepath.Join(f.dir, "no-podman")
-	_, err := r.Backup(context.Background(), f.repo(), config.ReadPodmanUnshare, []string{"/src"}, []string{"gitea"})
+	_, err := r.Backup(context.Background(), f.repo(), config.ReadPodmanUnshare, config.Source{Paths: []string{"/src"}}, []string{"gitea"})
 	if err == nil || !strings.Contains(err.Error(), "needs podman") {
 		t.Fatalf("expected a needs-podman error, got %v", err)
 	}
@@ -304,11 +304,11 @@ func TestExec_RestoreReadModeCheck(t *testing.T) {
 		t.Fatal(err)
 	}
 	direct := NewResticRunner()
-	untagged, err := direct.Backup(context.Background(), repo, config.ReadDirect, []string{src}, []string{"gitea"})
+	untagged, err := direct.Backup(context.Background(), repo, config.ReadDirect, config.Source{Paths: []string{src}}, []string{"gitea"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	tagged, err := direct.Backup(context.Background(), repo, config.ReadDirect, []string{src}, []string{"gitea", readModeTag(config.ReadPodmanUnshare)})
+	tagged, err := direct.Backup(context.Background(), repo, config.ReadDirect, config.Source{Paths: []string{src}}, []string{"gitea", readModeTag(config.ReadPodmanUnshare)})
 	if err != nil {
 		t.Fatal(err)
 	}

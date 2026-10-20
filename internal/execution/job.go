@@ -319,7 +319,7 @@ func runRepo(ctx context.Context, cfg *config.Config, jobName, repoName string, 
 	repo := cfg.Repositories[repoName]
 	job := cfg.Backups[jobName]
 
-	snapshotID, err := opts.Restic.Backup(ctx, repo, job.ReadMode(), job.Source.Paths, tags)
+	snapshotID, err := opts.Restic.Backup(ctx, repo, job.ReadMode(), job.Source, tags)
 	if err != nil {
 		outcome.BackupErr = err
 		return outcome

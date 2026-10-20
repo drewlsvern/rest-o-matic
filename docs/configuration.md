@@ -76,6 +76,76 @@ A policy's `schedule` is `hourly`, `daily` or `weekly`; see
 [Scheduling](scheduling.md#schedules). Passwords and other credentials can
 be stored encrypted; see [Secrets](secrets.md).
 
+## Leaving things out
+
+A job backs up everything under its `paths`. To leave part of that out,
+add exclusions to its `source`:
+
+```yaml
+backups:
+  config:
+    source:
+      paths: [~/.ssh, ~/.config, ~/.local]
+      exclude:
+        - ~/.local/share/containers   # rootless Podman images and containers
+        - ~/.local/share/Trash
+        - node_modules                # every node_modules, at any depth
+        - "*.iso"
+      exclude_caches: true            # default false
+      one_file_system: true           # default false
+    policy: daily
+    repositories: [s3]
+```
+
+`exclude` is a list of [restic exclude patterns](https://restic.readthedocs.io/en/stable/040_backup.html#excluding-files),
+passed to restic as written:
+
+- A pattern starting with `/` matches from the root:
+  `/home/me/.local/share/Trash` leaves out that directory and everything in
+  it.
+- A pattern without a leading `/` matches at any depth. A bare name like
+  `Cache` leaves out **every** file or directory called `Cache`, wherever it
+  is. That is usually what you want for `node_modules`, but check it before
+  using a common name.
+- `*`, `?` and `[...]` match within one path component, and `**` matches any
+  number of directories: `/home/*/.cache`, `/srv/**/tmp`.
+- A leading `~` is your home directory, as in `paths`. restic doesn't expand
+  `~` itself, so an unexpanded `~/...` pattern would leave nothing out. A `~`
+  followed by anything other than a separator is taken literally, so
+  `~$*` still matches Office lock files.
+
+`exclude_caches: true` leaves out the contents of any directory that holds a
+valid [`CACHEDIR.TAG`](https://bford.info/cachedir/) file (the tag file
+itself is kept). Many tools tag their caches this way, among them restic,
+kopia and cargo. Many others don't: browsers, VS Code and NuGet, for
+example.
+
+`one_file_system: true` stops restic from going into another filesystem
+mounted under a source path, such as a network share, an automounted
+drive, or the overlay mounts of running rootless containers under
+`~/.local/share/containers`. Anything you do want from such a mount then
+needs its own source path.
+
+Exclusions are silent: restic doesn't report what they left out. `validate`
+checks what it can from the config alone:
+
+- a pattern restic would refuse, such as `/data/[abc`, is an error. restic
+  would otherwise only refuse it once the backup starts, after the
+  before hooks have run;
+- a pattern starting with `/` that lies outside every source path of the
+  job is a warning, since it leaves nothing out;
+- a pattern starting with `/` that covers a whole source path is a warning,
+  since nothing from that path would be backed up.
+
+Adding or changing exclusions doesn't make the next backup re-read
+everything: restic still uses the job's previous snapshot as its parent.
+Each snapshot records the patterns it was taken with; `restic snapshots
+--json` shows them as `excludes`.
+
+On Windows, absolute patterns work written with backslashes
+(`C:\Users\me\AppData\Local\Temp`) or forward slashes
+(`C:/Users/me/AppData/Local/Temp`).
+
 ## Hooks
 
 `before` commands run first; if one fails, the rest are skipped and no
