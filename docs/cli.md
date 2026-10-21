@@ -6,9 +6,9 @@
 |---|---|
 | `rest-o-matic validate [--json]` | Checks the config file and reports every problem with its line, without running anything; `--json` prints one JSON document |
 | `rest-o-matic schema` | Prints a JSON Schema of the config file, for editors |
-| `rest-o-matic run <job>` | Runs one job now, whether or not it is due |
+| `rest-o-matic run <job>` | Runs one job now, whether or not it is due, showing its [progress](#progress-while-a-job-runs) |
 | `rest-o-matic tick` | Runs every job that is due, then exits. This is what your scheduler calls |
-| `rest-o-matic status [job]` | Shows each job's last run, outcome and next due time; with a job name, its recent runs |
+| `rest-o-matic status [job]` | Shows each job's last run, outcome and next due time, and how far a running job has got; with a job name, its recent runs |
 | `rest-o-matic exec <repository> -- <restic args>` | Runs a restic command against a configured repository |
 | `rest-o-matic secret <keygen\|public-key\|lock\|reveal\|check\|relock>` | Manages locked config values |
 | `rest-o-matic enrol <url>` | Connects this host to the [central app](central-app.md); `enroll` works too |
@@ -55,3 +55,43 @@ mail, the systemd journal, a pipe or a file stays exactly as plain as before.
 - `--color=auto` (default): colour only on a terminal
 - `--color=always` / `--color=never`: force it on or off
 - `NO_COLOR=1`: turn it off, unless `--color=always` is given
+
+## Progress while a job runs
+
+`run` and `tick` report each job's progress as it runs, on **standard
+error**. Standard output keeps only the results (`job config: OK` and the
+lines under it), so a script that reads them is unaffected.
+
+On a terminal, one line is redrawn in place:
+
+```
+config: backing up to s3 (1 of 2), 43%, 3.4 GiB of 7.9 GiB, about 1 hour left
+```
+
+When standard error goes to a file or a pipe, complete lines are written
+instead: one each time a job moves to another phase, and one for each job
+in a backup every [`progress_interval`](configuration.md#progress-lines)
+(5 minutes by default):
+
+```
+2026-10-21T09:14:05-05:00 config: backing up to s3 (1 of 2)
+2026-10-21T09:19:05-05:00 config: backing up to s3 (1 of 2), 12%, 1.0 GiB of 7.9 GiB, about 5 hours left
+2026-10-21T13:02:41-05:00 config: applying retention on s3 (1 of 2)
+```
+
+The shell chooses where each stream goes:
+
+| You want | Command |
+|---|---|
+| Results and progress in one log | `rest-o-matic run config > run.log 2>&1` |
+| The same, from cron | `rest-o-matic tick >> tick.log 2>&1` |
+| To watch it and keep a copy | `rest-o-matic run config 2>&1 \| tee run.log` (bash and zsh: `\|& tee run.log`) |
+| Results in a file, live progress on screen | `rest-o-matic run config > result.txt` |
+| Progress only, in its own file | `rest-o-matic run config 2> progress.log` |
+
+`2>&1` sends standard error wherever standard output is going at that
+point, so put it after `> run.log`. Under systemd, both streams go to the
+journal anyway.
+
+Progress lines contain no colour or other escape sequences, whatever
+`--color` is.

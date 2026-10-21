@@ -4,9 +4,12 @@ package config
 
 import (
 	"fmt"
+	"regexp"
 	"slices"
 	"sort"
+	"strconv"
 	"strings"
+	"time"
 
 	"gopkg.in/yaml.v3"
 
@@ -25,6 +28,59 @@ type Config struct {
 
 	// Notify holds commands that apply to every job.
 	Notify Notify `yaml:"notify"`
+
+	// ProgressInterval is how often run and tick write a plain progress
+	// line for each job in a backup when their stderr isn't a terminal;
+	// nil means DefaultProgressInterval. See ProgressLineInterval.
+	ProgressInterval *Interval `yaml:"progress_interval"`
+}
+
+// DefaultProgressInterval is the progress_interval used when the config
+// doesn't set one; MinProgressInterval is the shortest it may be, other
+// than 0, so that a slip can't fill a log.
+const (
+	DefaultProgressInterval = 5 * time.Minute
+	MinProgressInterval     = 10 * time.Second
+)
+
+// ProgressLineInterval is how often to write timed progress lines; 0 means
+// not at all.
+func (c *Config) ProgressLineInterval() time.Duration {
+	if c.ProgressInterval == nil {
+		return DefaultProgressInterval
+	}
+	return time.Duration(*c.ProgressInterval)
+}
+
+// Interval is a duration written as a whole number of seconds, minutes or
+// hours (30s, 5m, 1h), or 0.
+type Interval time.Duration
+
+var intervalRe = regexp.MustCompile(`^([0-9]+)(s|m|h)$`)
+
+func (iv *Interval) UnmarshalYAML(value *yaml.Node) error {
+	n := resolve(value)
+	if n.Kind != yaml.ScalarNode {
+		return fmt.Errorf("line %d: progress_interval: must be a duration like 30s, 5m or 1h, or 0", value.Line)
+	}
+	if n.Value == "0" {
+		*iv = 0
+		return nil
+	}
+	m := intervalRe.FindStringSubmatch(n.Value)
+	if m == nil {
+		return fmt.Errorf("line %d: progress_interval: %q is not a duration like 30s, 5m or 1h, or 0", value.Line, n.Value)
+	}
+	count, err := strconv.Atoi(m[1])
+	if err != nil {
+		return fmt.Errorf("line %d: progress_interval: %q is too large", value.Line, n.Value)
+	}
+	d := time.Duration(count) * map[string]time.Duration{"s": time.Second, "m": time.Minute, "h": time.Hour}[m[2]]
+	if d < MinProgressInterval {
+		return fmt.Errorf("line %d: progress_interval: must be at least %s, or 0 to turn timed progress lines off", value.Line, "10s")
+	}
+	*iv = Interval(d)
+	return nil
 }
 
 // Notify are commands that tell someone about a job, written once for

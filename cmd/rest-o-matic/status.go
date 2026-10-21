@@ -14,6 +14,7 @@ import (
 
 	"github.com/drewlsvern/rest-o-matic/internal/color"
 	"github.com/drewlsvern/rest-o-matic/internal/config"
+	"github.com/drewlsvern/rest-o-matic/internal/execution"
 	"github.com/drewlsvern/rest-o-matic/internal/lock"
 	"github.com/drewlsvern/rest-o-matic/internal/schedule"
 	"github.com/drewlsvern/rest-o-matic/internal/state"
@@ -55,7 +56,7 @@ of the jobs; use --json to act on the details from a script.`,
 			return err
 		}
 		held := func(job string) (bool, error) { return lock.JobHeld(lockDir(), job) }
-		report, err := buildStatus(cfg, st, time.Now(), only, held, store.LoadSnapshots)
+		report, err := buildStatus(cfg, st, time.Now(), only, held, store.LoadSnapshots, store.LoadProgress)
 		if err != nil {
 			return err
 		}
@@ -176,6 +177,45 @@ type snapshotStatus struct {
 type runningStatus struct {
 	Started time.Time `json:"started"`
 	Trigger string    `json:"trigger"`
+	// Progress is where the job is, as it last recorded; left out when it
+	// has recorded none, and always left out of the check-in.
+	Progress *progressStatus `json:"progress,omitempty"`
+}
+
+// progressStatus is a running job's recorded progress: its phase and,
+// during a backup, restic's latest figures.
+type progressStatus struct {
+	Phase            string     `json:"phase"`
+	Repository       *string    `json:"repository"`
+	RepositoryIndex  *int       `json:"repository_index"`
+	Repositories     *int       `json:"repositories"`
+	PercentDone      float64    `json:"percent_done"`
+	BytesDone        int64      `json:"bytes_done"`
+	TotalBytes       int64      `json:"total_bytes"`
+	FilesDone        int64      `json:"files_done"`
+	TotalFiles       int64      `json:"total_files"`
+	SecondsRemaining *int64     `json:"seconds_remaining"`
+	CurrentFiles     []string   `json:"current_files"`
+	Updated          time.Time  `json:"updated"`
+	LastReport       *time.Time `json:"last_report"`
+	LastMoved        *time.Time `json:"last_moved"`
+}
+
+func progressStatusOf(p *state.Progress) *progressStatus {
+	if p == nil {
+		return nil
+	}
+	ps := &progressStatus{
+		Phase:       p.Phase,
+		PercentDone: p.PercentDone, BytesDone: p.BytesDone, TotalBytes: p.TotalBytes,
+		FilesDone: p.FilesDone, TotalFiles: p.TotalFiles, SecondsRemaining: p.SecondsRemaining,
+		CurrentFiles: orEmpty(p.CurrentFiles),
+		Updated:      utc(p.Updated), LastReport: utcPtr(p.LastReport), LastMoved: utcPtr(p.LastMoved),
+	}
+	if p.Repository != "" {
+		ps.Repository, ps.RepositoryIndex, ps.Repositories = strPtr(p.Repository), &p.RepositoryIndex, &p.Repositories
+	}
+	return ps
 }
 
 // runStatus is one finished run. Started and Trigger are null for a record
@@ -198,9 +238,10 @@ type repoStatus struct {
 
 // buildStatus assembles the report for every configured job, or for only
 // when it is non-empty. held reports whether a job's lock is currently
-// held, which is what makes a recorded running marker believable, and
-// snapshots returns a job's recorded snapshot lists by repository.
-func buildStatus(cfg *config.Config, st *state.State, now time.Time, only string, held func(job string) (bool, error), snapshots func(job string) (map[string]state.SnapshotList, error)) (statusReport, error) {
+// held, which is what makes a recorded running marker believable,
+// snapshots returns a job's recorded snapshot lists by repository, and
+// progress, when non-nil, a running job's recorded progress.
+func buildStatus(cfg *config.Config, st *state.State, now time.Time, only string, held func(job string) (bool, error), snapshots func(job string) (map[string]state.SnapshotList, error), progress func(job string) *state.Progress) (statusReport, error) {
 	report := statusReport{
 		FormatVersion: statusFormatVersion,
 		GeneratedAt:   utc(now),
@@ -212,7 +253,7 @@ func buildStatus(cfg *config.Config, st *state.State, now time.Time, only string
 	} else {
 		names = jobNames(cfg)
 	}
-	jobs, err := buildJobStatuses(cfg, st, now, names, jobDetail{runs: only != "", snapshots: only != ""}, held, snapshots)
+	jobs, err := buildJobStatuses(cfg, st, now, names, jobDetail{runs: only != "", snapshots: only != ""}, held, snapshots, progress)
 	report.Jobs = jobs
 	return report, err
 }
@@ -232,7 +273,7 @@ func jobNames(cfg *config.Config) []string {
 type jobDetail struct{ runs, snapshots bool }
 
 // buildJobStatuses reports on each named job.
-func buildJobStatuses(cfg *config.Config, st *state.State, now time.Time, names []string, detail jobDetail, held func(job string) (bool, error), snapshots func(job string) (map[string]state.SnapshotList, error)) ([]jobStatus, error) {
+func buildJobStatuses(cfg *config.Config, st *state.State, now time.Time, names []string, detail jobDetail, held func(job string) (bool, error), snapshots func(job string) (map[string]state.SnapshotList, error), progress func(job string) *state.Progress) ([]jobStatus, error) {
 	jobs := []jobStatus{}
 	for _, name := range names {
 		js := st.Jobs[name]
@@ -264,6 +305,11 @@ func buildJobStatuses(cfg *config.Config, st *state.State, now time.Time, names 
 		switch {
 		case isHeld && js.Running != nil:
 			job.Running = &runningStatus{Started: utc(js.Running.Started), Trigger: js.Running.Trigger}
+			// Only believed while the lock is held: a killed process leaves
+			// its record behind.
+			if progress != nil {
+				job.Running.Progress = progressStatusOf(progress(name))
+			}
 		case isHeld:
 			job.Waiting = true
 		}
@@ -436,6 +482,11 @@ func writeJobHistory(w io.Writer, r statusReport, p color.Painter, loc *time.Loc
 	if note := activity(job, now); note != "" {
 		fmt.Fprintln(w, note)
 	}
+	if job.Running != nil && job.Running.Progress != nil {
+		for _, line := range progressDetail(*job.Running.Progress, now) {
+			fmt.Fprintln(w, "  "+line)
+		}
+	}
 	fmt.Fprintln(w)
 
 	if len(job.Runs) == 0 {
@@ -536,11 +587,71 @@ func outcomeCell(outcome string, p color.Painter) cell {
 func activity(job jobStatus, now time.Time) string {
 	switch {
 	case job.Running != nil:
-		return fmt.Sprintf("running since %s (started by %s)", ago(now.Sub(job.Running.Started)), job.Running.Trigger)
+		note := fmt.Sprintf("running since %s (started by %s)", ago(now.Sub(job.Running.Started)), job.Running.Trigger)
+		if p := job.Running.Progress; p != nil {
+			note += ": " + progressSummary(*p, now)
+		}
+		return note
 	case job.Waiting:
 		return "waiting for a repository or a free slot"
 	}
 	return ""
+}
+
+// pauseShownAfter is how long restic's figures must stand still before
+// status says so. Shorter pauses are normal: on a slow upload restic stops
+// reading while it sends what it has.
+const pauseShownAfter = time.Minute
+
+// progressSummary describes a running job's progress in one line: its
+// phase, and during a backup how far it has got and how long is left, or
+// how long its figures have not moved.
+func progressSummary(p progressStatus, now time.Time) string {
+	where := ""
+	if p.Repository != nil {
+		where = fmt.Sprintf(" %s (%d of %d)", *p.Repository, *p.RepositoryIndex, *p.Repositories)
+	}
+	switch p.Phase {
+	case execution.PhaseBeforeHooks:
+		return "before hooks"
+	case execution.PhaseAfterHooks:
+		return "after hooks"
+	case execution.PhaseForget:
+		return "applying retention on" + where
+	case execution.PhaseBackup:
+	default:
+		return p.Phase
+	}
+	parts := []string{"backing up to" + where}
+	if p.LastReport == nil {
+		return parts[0]
+	}
+	parts = append(parts, fmt.Sprintf("%d%%", int(p.PercentDone*100)), humanBytes(p.BytesDone)+" of "+humanBytes(p.TotalBytes))
+	switch {
+	case p.LastMoved != nil && now.Sub(*p.LastMoved) > pauseShownAfter:
+		parts = append(parts, "no progress reported for "+span(now.Sub(*p.LastMoved)))
+	case p.SecondsRemaining != nil && *p.SecondsRemaining < 60:
+		parts = append(parts, "under a minute left")
+	case p.SecondsRemaining != nil:
+		parts = append(parts, "about "+span(time.Duration(*p.SecondsRemaining)*time.Second)+" left")
+	}
+	return strings.Join(parts, ", ")
+}
+
+// progressDetail is what `status <job>` adds about a running job's
+// progress: the files being read and when restic last reported.
+func progressDetail(p progressStatus, now time.Time) []string {
+	var lines []string
+	for _, f := range p.CurrentFiles {
+		lines = append(lines, "reading "+clip(f))
+	}
+	if p.LastReport != nil {
+		lines = append(lines, "restic last reported "+ago(now.Sub(*p.LastReport)))
+	}
+	if p.LastMoved != nil {
+		lines = append(lines, "figures last moved "+ago(now.Sub(*p.LastMoved)))
+	}
+	return lines
 }
 
 // failureNotes explains a failed run: the result for each repository it

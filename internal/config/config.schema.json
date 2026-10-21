@@ -13,6 +13,19 @@
       "minimum": 1,
       "description": "How many jobs may run at the same time on this host. Defaults to 2."
     },
+    "progress_interval": {
+      "oneOf": [
+        {
+          "type": "string",
+          "pattern": "^(0|[0-9]+(s|m|h))$"
+        },
+        {
+          "type": "integer",
+          "enum": [0]
+        }
+      ],
+      "description": "How often run and tick write a progress line for each job in a backup when their output goes to a file or pipe: a duration like 30s, 5m or 1h (at least 10s), or 0 for a line only at each change of phase. Defaults to 5m."
+    },
     "policies": {
       "type": [
         "object",

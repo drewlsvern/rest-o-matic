@@ -26,7 +26,7 @@ func TestBackup_ExclusionArguments(t *testing.T) {
 	} {
 		t.Run(name, func(t *testing.T) {
 			f := newReadModeFakes(t)
-			if _, err := f.runner().Backup(context.Background(), f.repo(), config.ReadDirect, tc.src, []string{"docs"}); err != nil {
+			if _, err := f.runner().Backup(context.Background(), f.repo(), config.ReadDirect, tc.src, []string{"docs"}, nil); err != nil {
 				t.Fatalf("Backup: %v", err)
 			}
 			if got, want := f.backupCall(t), "-r "+f.repo().URL+" "+tc.want; got != want {

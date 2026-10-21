@@ -5,7 +5,6 @@ package execution
 import (
 	"bytes"
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -143,38 +142,14 @@ func (r *ResticRunner) reveal(field string, s config.Secret) (string, error) {
 	return value, nil
 }
 
-// resticMessage is the subset of restic's --json output lines this package
-// cares about. restic emits one JSON object per line; the line with
-// message_type "summary" carries the resulting snapshot id.
-type resticMessage struct {
-	MessageType string `json:"message_type"`
-	SnapshotID  string `json:"snapshot_id"`
-}
-
-func parseSnapshotID(output []byte) string {
-	for _, line := range bytes.Split(output, []byte("\n")) {
-		line = bytes.TrimSpace(line)
-		if len(line) == 0 {
-			continue
-		}
-		var msg resticMessage
-		if err := json.Unmarshal(line, &msg); err != nil {
-			continue
-		}
-		if msg.MessageType == "summary" {
-			return msg.SnapshotID
-		}
-	}
-	return ""
-}
-
 // Backup runs `restic backup` against repo for the given source's paths,
 // leaving out what its exclusions match, and tags the resulting snapshot
 // with every tag supplied (the caller is responsible for including the
-// automatic job-name tag alongside any user tags). restic's
+// automatic job-name tag alongside any user tags). restic's progress
+// reports go to onStatus as they arrive, when it is non-nil. restic's
 // own stderr output is preserved on failure per the design's "surface
 // restic's errors, don't reinterpret them" decision.
-func (r *ResticRunner) Backup(ctx context.Context, repo config.Repository, mode string, src config.Source, tags []string) (snapshotID string, err error) {
+func (r *ResticRunner) Backup(ctx context.Context, repo config.Repository, mode string, src config.Source, tags []string, onStatus func(BackupStatus)) (snapshotID string, err error) {
 	args := []string{"-r", repo.URL, "backup"}
 	args = append(args, src.Paths...)
 	for _, p := range src.Exclude {
@@ -205,18 +180,21 @@ func (r *ResticRunner) Backup(ctx context.Context, repo config.Repository, mode 
 	} else {
 		configureWrappedResticCancel(cmd)
 	}
-	var stdout, stderr bytes.Buffer
-	cmd.Stdout = &stdout
+	stdout := &backupOutput{onStatus: onStatus}
+	var stderr bytes.Buffer
+	cmd.Stdout = stdout
 	cmd.Stderr = &stderr
 
-	if runErr := cmd.Run(); runErr != nil {
+	runErr := cmd.Run()
+	stdout.close()
+	if runErr != nil {
 		err := resticFailure("restic backup failed", runErr, stderr.String())
 		if hint := unreadableHint(runErr, stderr.String(), mode); hint != "" {
 			err = fmt.Errorf("%w\nhint: %s", err, hint)
 		}
 		return "", err
 	}
-	return parseSnapshotID(stdout.Bytes()), nil
+	return stdout.snapshotID, nil
 }
 
 // hostGOOS and lookPath are runtime.GOOS and exec.LookPath; variables so

@@ -24,6 +24,15 @@ type Options struct {
 	Prior Prior
 	// Now is the clock; nil means time.Now. Tests set it.
 	Now func() time.Time
+	// Progress, when set, is told each change of phase and restic's
+	// progress reports during each backup.
+	Progress Progress
+}
+
+func (o Options) phase(job string, p Phase) {
+	if o.Progress != nil {
+		o.Progress.Phase(job, p)
+	}
 }
 
 // Prior is a job's recorded state going into a run.
@@ -158,6 +167,9 @@ func RunJob(work, cleanup context.Context, cfg *config.Config, jobName string, o
 	env := []string{"RESTOMATIC_JOB=" + jobName}
 	started := opts.now()
 
+	if len(job.Hooks.Before) > 0 {
+		opts.phase(jobName, Phase{Name: PhaseBeforeHooks})
+	}
 	if err := runHooksStopOnError(work, job.Hooks.Before, env); err != nil {
 		result.HookErr = err
 	} else {
@@ -168,11 +180,11 @@ func RunJob(work, cleanup context.Context, cfg *config.Config, jobName string, o
 		if mode := job.ReadMode(); mode != config.ReadDirect {
 			tags = append(tags, readModeTag(mode))
 		}
-		for _, ref := range job.Repositories {
+		for i, ref := range job.Repositories {
 			if work.Err() != nil {
 				break
 			}
-			result.Repos = append(result.Repos, runRepo(work, cfg, jobName, ref.Name, tags, opts))
+			result.Repos = append(result.Repos, runRepo(work, cfg, jobName, ref.Name, i+1, len(job.Repositories), tags, opts))
 		}
 	}
 	if work.Err() != nil {
@@ -187,6 +199,9 @@ func RunJob(work, cleanup context.Context, cfg *config.Config, jobName string, o
 	stop := context.AfterFunc(work, func() { time.AfterFunc(cleanupGrace, cancel) })
 	defer stop()
 
+	if len(job.Hooks.After.Always)+len(job.Hooks.After.Success)+len(job.Hooks.After.Failure) > 0 {
+		opts.phase(jobName, Phase{Name: PhaseAfterHooks})
+	}
 	result.AlwaysErrs = runHooksAll(afterCtx, job.Hooks.After.Always, env)
 
 	outcomeEnv := append(env, outcomeEnvVars(result)...)
@@ -313,13 +328,20 @@ func oneLine(s string) string {
 	return s
 }
 
-func runRepo(ctx context.Context, cfg *config.Config, jobName, repoName string, tags []string, opts Options) RepoOutcome {
+// runRepo backs the job up to one repository and enforces its retention
+// there. index (1-based) and count place the repository among the job's.
+func runRepo(ctx context.Context, cfg *config.Config, jobName, repoName string, index, count int, tags []string, opts Options) RepoOutcome {
 	outcome := RepoOutcome{Repository: repoName}
 
 	repo := cfg.Repositories[repoName]
 	job := cfg.Backups[jobName]
 
-	snapshotID, err := opts.Restic.Backup(ctx, repo, job.ReadMode(), job.Source, tags)
+	opts.phase(jobName, Phase{Name: PhaseBackup, Repository: repoName, Index: index, Count: count})
+	var onStatus func(BackupStatus)
+	if opts.Progress != nil {
+		onStatus = func(s BackupStatus) { opts.Progress.BackupStatus(jobName, s) }
+	}
+	snapshotID, err := opts.Restic.Backup(ctx, repo, job.ReadMode(), job.Source, tags, onStatus)
 	if err != nil {
 		outcome.BackupErr = err
 		return outcome
@@ -331,6 +353,7 @@ func runRepo(ctx context.Context, cfg *config.Config, jobName, repoName string, 
 		outcome.ForgetErr = err
 		return outcome
 	}
+	opts.phase(jobName, Phase{Name: PhaseForget, Repository: repoName, Index: index, Count: count})
 	kept, listed, err := opts.Restic.Forget(ctx, repo, jobName, retention)
 	if err != nil {
 		outcome.ForgetErr = err
