@@ -20,6 +20,12 @@ import (
 // progress line for restic's reports; a change of phase redraws at once.
 const redrawInterval = 250 * time.Millisecond
 
+// fallbackTerminalWidth is the width the terminal line is cut to when the
+// terminal's own can't be read. The line must never wrap: a carriage
+// return only goes back to the start of the last row, so a wrapped line
+// can't be redrawn in place.
+const fallbackTerminalWidth = 80
+
 // progressOut is the progress printer of the running `run` or `tick`, nil
 // for every other command. Messages written while it is set go through
 // its Println, so that they never land inside the terminal line.
@@ -62,7 +68,7 @@ func startProgress(cfg *config.Config) *progressPrinter {
 		if w, _, err := term.GetSize(fd); err == nil && w > 0 {
 			return w
 		}
-		return 80
+		return fallbackTerminalWidth
 	}
 	progressOut = newProgressPrinter(os.Stderr, term.IsTerminal(fd), width, cfg.ProgressLineInterval(), nil)
 	return progressOut
@@ -73,7 +79,7 @@ func newProgressPrinter(w io.Writer, terminal bool, width func() int, interval t
 		now = time.Now
 	}
 	if width == nil {
-		width = func() int { return 80 }
+		width = func() int { return fallbackTerminalWidth }
 	}
 	return &progressPrinter{w: w, terminal: terminal, width: width, interval: interval, now: now, jobs: map[string]*jobProgress{}}
 }
