@@ -101,7 +101,7 @@ func expandHome(p string) (string, error) {
 // else at the top level (an `x-...` holder for YAML anchors, say) is not
 // part of the config, and only matters where it is aliased into one of
 // these.
-var configSections = map[string]bool{"max_concurrent": true, "policies": true, "repositories": true, "backups": true, "notify": true}
+var configSections = map[string]bool{"max_concurrent": true, "policies": true, "repositories": true, "backups": true, "notify": true, "progress_interval": true}
 
 // checkLockedPlacement rejects a locked value anywhere other than a
 // repository's password or one of its env values, and a `!plain` value

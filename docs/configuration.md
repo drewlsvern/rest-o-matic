@@ -8,6 +8,7 @@ backup and an application-aware one with hooks and per-repository retention:
 
 ```yaml
 max_concurrent: 2   # how many jobs may run at once across the whole host
+progress_interval: 5m   # how often run and tick log a job's progress (see below)
 
 policies:
   hot:
@@ -75,6 +76,22 @@ A repository has to be initialised once before its first backup; see
 A policy's `schedule` is `hourly`, `daily` or `weekly`; see
 [Scheduling](scheduling.md#schedules). Passwords and other credentials can
 be stored encrypted; see [Secrets](secrets.md).
+
+## Progress lines
+
+When `run` or `tick` writes to a file or a pipe rather than a terminal, it
+logs each job's progress at every change of phase, and every
+`progress_interval` during a backup (see
+[Progress while a job runs](cli.md#progress-while-a-job-runs)):
+
+- a duration in whole seconds, minutes or hours: `30s`, `5m`, `1h`. The
+  shortest allowed is `10s`, so a slip can't fill a log;
+- `0` for no timed lines, leaving one line per phase;
+- left out, `5m`.
+
+It doesn't change the line redrawn on a terminal, or how up to date
+[`status`](status.md#a-running-jobs-progress) is: a running job records its
+progress every 5 seconds whatever this is set to.
 
 ## Leaving things out
 

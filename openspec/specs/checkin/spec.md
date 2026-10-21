@@ -3,9 +3,7 @@
 ## Purpose
 
 Keeps the central app up to date with what each host is doing, using one small request per tick, so that it can show every host's backups in one place and notice a host that has stopped reporting.
-
 ## Requirements
-
 ### Requirement: A Check-in at the Start of Every Tick
 When the host is enrolled for the config file in use, every `tick` SHALL send one check-in to the central app after the config has loaded and the state directory check has passed, and before any job starts. `run` SHALL NOT check in. A host that is not enrolled, or is enrolled for a different config file, SHALL make no request.
 
@@ -28,7 +26,7 @@ Every check-in SHALL carry the host's ID, the time it was sent, the host's hostn
 
 The content of a part SHALL be included only when its fingerprint differs from the last one the central app acknowledged, or when the central app has asked for that part again. A part is acknowledged when a check-in that included it receives a successful reply. When the reply asks for a part again, it SHALL be included in the next check-in whatever its fingerprint.
 
-- *status* SHALL be every job's state and recorded runs, as `status --json` reports them for each job, without the time the report was made or the time of the last tick.
+- *status* SHALL be every job's state and recorded runs, as `status --json` reports them for each job, without the time the report was made, the time of the last tick, or a running job's progress.
 - *snapshots* SHALL be every job's recorded snapshot lists.
 - *config* SHALL be the config file's exact text.
 
@@ -51,6 +49,10 @@ The content of a part SHALL be included only when its fingerprint differs from t
 #### Scenario: Central app asks again
 - **WHEN** a reply lists `snapshots` as wanted again
 - **THEN** the next check-in SHALL include the *snapshots* part even though it is unchanged
+
+#### Scenario: Progress does not change the status part
+- **WHEN** a job is running across two ticks and its progress has moved between them, and nothing else has changed
+- **THEN** the second check-in SHALL carry fingerprints only, and the *status* part SHALL contain no progress
 
 ### Requirement: Config Withheld While It Holds Plain-Text Secrets
 The *config* part SHALL NOT carry the config text while any repository's `password`, or any value under a repository's `env`, is written in plain text, with two exceptions: an `env` value whose name is on rest-o-matic's fixed list of settings known not to be secret (such as `AWS_DEFAULT_REGION` or `RESTIC_COMPRESSION`), and an `env` value marked `!plain`, MAY be plain text. Any other name SHALL be treated as a secret. While withheld, the part SHALL carry its fingerprint and the reason, naming the repositories and fields concerned. Locked values, `password_file` and `password_command` SHALL NOT prevent it being sent. Hook commands SHALL be sent as written.
@@ -101,3 +103,4 @@ The messages exchanged at enrolment and check-in SHALL be described in the repos
 #### Scenario: Real output matches the schema
 - **WHEN** the test suite runs
 - **THEN** a check-in produced by the host from a real config and state SHALL validate against the check-in schema
+

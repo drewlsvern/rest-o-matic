@@ -83,7 +83,7 @@ func mustStatus(t *testing.T, st *state.State, now time.Time, only string, held 
 	if st.Jobs == nil {
 		st.Jobs = map[string]state.JobState{}
 	}
-	r, err := buildStatus(statusConfig(), st, now, only, held, noSnapshots)
+	r, err := buildStatus(statusConfig(), st, now, only, held, noSnapshots, nil)
 	if err != nil {
 		t.Fatalf("buildStatus: %v", err)
 	}
@@ -318,7 +318,7 @@ func TestStatus_RunningWaitingAndStaleMarker(t *testing.T) {
 
 func TestStatus_LockProbeErrorIsReported(t *testing.T) {
 	probe := func(string) (bool, error) { return false, errors.New("permission denied") }
-	if _, err := buildStatus(statusConfig(), &state.State{Jobs: map[string]state.JobState{}}, time.Now(), "", probe, noSnapshots); err == nil {
+	if _, err := buildStatus(statusConfig(), &state.State{Jobs: map[string]state.JobState{}}, time.Now(), "", probe, noSnapshots, nil); err == nil {
 		t.Fatal("expected an error when a job's lock can't be checked")
 	}
 }
@@ -636,7 +636,7 @@ func TestStatus_SnapshotLists(t *testing.T) {
 		}}, nil
 	}
 	build := func(only string) statusReport {
-		r, err := buildStatus(statusConfig(), &state.State{Jobs: map[string]state.JobState{}}, now, only, notHeld, lists)
+		r, err := buildStatus(statusConfig(), &state.State{Jobs: map[string]state.JobState{}}, now, only, notHeld, lists, nil)
 		if err != nil {
 			t.Fatalf("buildStatus: %v", err)
 		}

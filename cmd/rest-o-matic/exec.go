@@ -63,6 +63,7 @@ func executeWithSlot(work, cleanup context.Context, cfg *config.Config, store *s
 	// Holding the job lock proves no earlier execution is alive, so a
 	// running marker still present was left by one that was killed.
 	warnStateNotSaved(name, store.ClearRunning(name))
+	warnStateNotSaved(name, store.RemoveProgress(name))
 
 	if stillDue != nil && !stillDue() {
 		return execution.JobResult{Job: name}, jobNotDue
@@ -70,7 +71,7 @@ func executeWithSlot(work, cleanup context.Context, cfg *config.Config, store *s
 
 	for _, repo := range repositoryNames(cfg.Backups[name]) {
 		l, err := lock.WaitRepository(work, opts.LockDir, repo, func() {
-			fmt.Printf("job %s: waiting for repository %s\n", name, repo)
+			progressOut.Println(os.Stdout, fmt.Sprintf("job %s: waiting for repository %s", name, repo))
 		})
 		if err != nil {
 			return setupFailed(fmt.Errorf("acquiring lock for repository %q: %w", repo, err))
@@ -79,7 +80,7 @@ func executeWithSlot(work, cleanup context.Context, cfg *config.Config, store *s
 	}
 
 	slot, err := lock.WaitSlot(work, opts.LockDir, cfg.MaxConcurrent, func() {
-		fmt.Printf("job %s: waiting for a free slot\n", name)
+		progressOut.Println(os.Stdout, fmt.Sprintf("job %s: waiting for a free slot", name))
 	})
 	if err != nil {
 		return setupFailed(fmt.Errorf("acquiring concurrency slot: %w", err))
@@ -128,6 +129,17 @@ func executeAndRecord(work, cleanup context.Context, cfg *config.Config, store *
 
 	started := time.Now()
 	warnStateNotSaved(name, store.MarkRunning(name, started, trigger))
+
+	// The progress record goes with the run, however it ends; the job lock
+	// is held until after this returns, which SaveProgress relies on.
+	recorder := execution.NewRecorder(name, store, nil, func(err error) {
+		warnf("job %s: progress could not be saved: %v", name, err)
+	})
+	opts.Progress = execution.Progresses{recorder, opts.Progress}
+	defer func() {
+		progressOut.Done(name)
+		warnStateNotSaved(name, store.RemoveProgress(name))
+	}()
 
 	result := execution.RunJob(work, cleanup, cfg, name, opts)
 
@@ -180,11 +192,17 @@ func runRecord(r execution.JobResult, started, finished time.Time, trigger strin
 // is unaffected, but with no record of this run it will look due again.
 func warnStateNotSaved(job string, err error) {
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "%s job %s: state could not be saved: %v\n", color.Stderr.Warn("warning:"), job, err)
+		warnf("job %s: state could not be saved: %v", job, err)
 	}
 }
 
+// warnf prints a warning on stderr.
+func warnf(format string, args ...any) {
+	progressOut.Println(os.Stderr, color.Stderr.Warn("warning:")+" "+fmt.Sprintf(format, args...))
+}
+
 func printResult(r execution.JobResult) {
+	progressOut.Clear()
 	failed := color.Stdout.Error("FAILED")
 	switch {
 	case r.Interrupted && r.InterruptErr != nil:

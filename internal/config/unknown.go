@@ -20,7 +20,7 @@ var schemaWalkKeywords = map[string]bool{
 	"items": true, "oneOf": true, "anyOf": true, "type": true, "definitions": true,
 	// Constrain values only, which isn't the walk's business.
 	"$schema": true, "$id": true, "title": true, "description": true, "enum": true,
-	"minimum": true, "minItems": true, "required": true,
+	"minimum": true, "minItems": true, "required": true, "pattern": true,
 }
 
 var (

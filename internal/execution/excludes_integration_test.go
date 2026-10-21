@@ -100,7 +100,7 @@ func TestBackup_ExclusionsLeaveFilesOut(t *testing.T) {
 	}
 	r := NewResticRunner()
 
-	first, err := r.Backup(context.Background(), repo, config.ReadDirect, source, []string{"docs"})
+	first, err := r.Backup(context.Background(), repo, config.ReadDirect, source, []string{"docs"}, nil)
 	if err != nil {
 		t.Fatalf("Backup: %v", err)
 	}
@@ -112,7 +112,7 @@ func TestBackup_ExclusionsLeaveFilesOut(t *testing.T) {
 
 	// Adding a pattern doesn't lose the parent snapshot.
 	source.Exclude = append(source.Exclude, filepath.Join(src, "later"))
-	second, err := r.Backup(context.Background(), repo, config.ReadDirect, source, []string{"docs"})
+	second, err := r.Backup(context.Background(), repo, config.ReadDirect, source, []string{"docs"}, nil)
 	if err != nil {
 		t.Fatalf("second Backup: %v", err)
 	}

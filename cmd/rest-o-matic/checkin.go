@@ -253,7 +253,9 @@ type snapshotsPartList struct {
 func buildCheckin(cfg *config.Config, st *state.State, store *state.Store, now time.Time, host central.Host, hostID *string, c state.CheckinState, all bool) (central.CheckinRequest, error) {
 	held := func(job string) (bool, error) { return lock.JobHeld(lockDir(), job) }
 	names := jobNames(cfg)
-	jobs, err := buildJobStatuses(cfg, st, now, names, jobDetail{runs: true}, held, store.LoadSnapshots)
+	// No progress: it would change the part on every tick while a job
+	// runs, and the contract doesn't carry it yet.
+	jobs, err := buildJobStatuses(cfg, st, now, names, jobDetail{runs: true}, held, store.LoadSnapshots, nil)
 	if err != nil {
 		return central.CheckinRequest{}, err
 	}

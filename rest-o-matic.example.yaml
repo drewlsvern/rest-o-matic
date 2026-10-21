@@ -17,6 +17,12 @@
 # once. Defaults to 2 if omitted.
 # max_concurrent: 2
 
+# How often `run` and `tick` log each job's progress during a backup when
+# their output goes to a file or pipe (on a terminal they redraw one line
+# instead). A duration like 30s, 5m or 1h, at least 10s; 0 logs only each
+# change of phase. Defaults to 5m if omitted.
+# progress_interval: 5m
+
 # ---------------------------------------------------------------------------
 # Policies: named, reusable schedule + retention. Referenced by name from a
 # job's `policy:` field. A job may override individual retention keys

@@ -71,7 +71,7 @@ or the tick's exit status.`,
 		// reports a boolean, not how overdue a job is.
 		sort.Strings(due)
 
-		opts := execution.Options{Restic: newResticRunner(), LockDir: lockDir()}
+		opts := execution.Options{Restic: newResticRunner(), LockDir: lockDir(), Progress: startProgress(cfg)}
 		work, cleanup, stop := interruptContexts()
 		defer stop()
 		attempts := dispatch(work, cleanup, cfg, store, due, opts)

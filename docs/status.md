@@ -28,11 +28,57 @@ postgres   hourly    1 hour ago      ok       8s     due since 19:00
   your local time.
 - A failed job lists the result for each repository it tried, or the error
   of whatever else failed (a hook, an interruption).
-- A job that has started is shown as `running`; one queued behind a busy
-  repository or slot is shown as `waiting` (see [Concurrency](concurrency.md)).
+- A job that has started is shown as `running`, with where it has got to
+  (see [A running job's progress](#a-running-jobs-progress)); one queued
+  behind a busy repository or slot is shown as `waiting` (see
+  [Concurrency](concurrency.md)).
 
 `rest-o-matic status <job>` lists that job's recent runs, newest first. The
 last 20 are kept.
+
+## A running job's progress
+
+While a job runs, `status` shows what it is doing, whether `tick` or `run`
+started it:
+
+```
+config     daily     1 day ago       ok       2h4m   due since 00:00
+  running since 1 hour ago (started by tick): backing up to s3 (1 of 2), 43%, 3.4 GiB of 7.9 GiB, about 1 hour left
+mssql-dev  weekly    6 days ago      ok       3m10s  due since 00:00
+  running since 2 minutes ago (started by tick): before hooks
+```
+
+The phases are `before hooks`, `backing up to <repository> (i of n)`,
+`applying retention on <repository> (i of n)` and `after hooks`. During a
+backup the figures are restic's own and at most a few seconds old. The total
+grows while restic is still counting files, so the percentage can drop back
+early in a run.
+
+When restic's figures haven't moved for over a minute, the time left is
+replaced by how long they have stood still:
+
+```
+  running since 1 hour ago (started by tick): backing up to s3 (1 of 2), 43%, 3.4 GiB of 7.9 GiB, no progress reported for 12 minutes
+```
+
+That isn't necessarily a fault. On a slow upload restic stops reading while
+it sends what it has, and over a slow link that can take minutes.
+rest-o-matic only reports it: nothing warns, times out or stops the job.
+`status <job>` tells the two apart. It shows the files being read, when
+restic last reported, and when its figures last moved:
+
+```
+running since 1 hour ago (started by tick): backing up to s3 (1 of 2), 43%, 3.4 GiB of 7.9 GiB, no progress reported for 12 minutes
+  reading /home/me/.config/Code/User/workspaceStorage/state.vscdb
+  restic last reported just now
+  figures last moved 12 minutes ago
+```
+
+If restic still reports but the figures stand still, it's waiting on the
+upload. If restic has stopped reporting too, something is wrong.
+
+Progress is shown only while the job's lock is held, so a job whose process
+was killed is never shown with the progress it had.
 
 ## Snapshots
 
@@ -71,6 +117,13 @@ shown without contacting it. The "as of" time says how old it is.
 `rest-o-matic status --json` prints the same information as a single JSON
 document, with full snapshot IDs and untruncated errors, for scripts and
 monitoring. Times are UTC, and values that don't apply are `null`.
+
+A running job's `running` entry has a `progress` object once the job has
+recorded any: `phase` (`before_hooks`, `backup`, `forget` or
+`after_hooks`), `repository`, `repository_index` and `repositories`,
+restic's `percent_done`, `bytes_done`, `total_bytes`, `files_done`,
+`total_files`, `seconds_remaining` and `current_files`, and the times
+`updated`, `last_report` and `last_moved`. It isn't sent to the central app.
 
 Every job carries a `snapshot_lists` entry for each of its repositories,
 with when the list was taken, how many snapshots it holds and the newest
