@@ -34,4 +34,4 @@
 - [x] 6.1 `docs/cli.md`: progress in `status`, `status <job>` and `--json`; progress output from `run` and `tick` on standard error, terminal and plain modes
 - [x] 6.2 `docs/configuration.md` and `rest-o-matic.example.yaml`: `progress_interval`
 - [x] 6.3 Run a real backup of a large folder: watch `status` while it runs, and check the `run` terminal line and a redirected log by hand; run the progress tests with restic 0.16.4 as well
-- [ ] 6.4 `go test ./...` and `go vet ./...` pass locally, and CI (including the Windows job) is green
+- [x] 6.4 `go test ./...` and `go vet ./...` pass locally, and CI (including the Windows job) is green (PR #32: build and windows green)
