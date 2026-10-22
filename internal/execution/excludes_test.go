@@ -26,7 +26,7 @@ func TestBackup_ExclusionArguments(t *testing.T) {
 	} {
 		t.Run(name, func(t *testing.T) {
 			f := newReadModeFakes(t)
-			if _, err := f.runner().Backup(context.Background(), f.repo(), config.ReadDirect, tc.src, []string{"docs"}, nil); err != nil {
+			if _, err := f.runner().Backup(context.Background(), f.repo(), config.ReadDirect, tc.src, []string{"docs"}, nil, nil); err != nil {
 				t.Fatalf("Backup: %v", err)
 			}
 			if got, want := f.backupCall(t), "-r "+f.repo().URL+" "+tc.want; got != want {
@@ -76,7 +76,7 @@ func TestRunJob_ExclusionsReachEveryBackup(t *testing.T) {
 			}
 			if readAs == config.ReadPodmanUnshare {
 				for _, c := range f.calls(t, "podman") {
-					if !strings.Contains(c, want) {
+					if strings.Contains(c, " backup ") && !strings.Contains(c, want) {
 						t.Errorf("wrapped call %q doesn't carry the exclusions", c)
 					}
 				}

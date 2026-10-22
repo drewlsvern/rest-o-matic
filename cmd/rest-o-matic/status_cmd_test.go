@@ -82,7 +82,8 @@ func TestCLI_StatusReportsFailedRunAndExitsZero(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("expected exit 0 although a job failed, got %d (stderr: %s)", code, stderr)
 	}
-	for _, want := range []string{"documents", "FAILED", "  nas: backup failed: restic backup failed"} {
+	// The repository doesn't exist, so the connection check is what fails.
+	for _, want := range []string{"documents", "FAILED", "  nas: backup failed: restic could not open the repository"} {
 		if !contains(stdout, want) {
 			t.Errorf("expected stdout to contain %q, got: %s", want, stdout)
 		}

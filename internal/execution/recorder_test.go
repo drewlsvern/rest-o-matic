@@ -108,3 +108,24 @@ func TestRecorder_WriteFailureWarnedOnce(t *testing.T) {
 		t.Fatalf("got warnings %v", warnings)
 	}
 }
+
+func TestRecorder_RetryWrittenAtOnce(t *testing.T) {
+	clock := &fakeClock{t: time.Date(2026, 10, 21, 9, 0, 0, 0, time.UTC)}
+	saver := &memSaver{}
+	r := NewRecorder("docs", saver, clock.now, nil)
+	r.Phase("docs", Phase{Name: PhaseCheck, Repository: "s3", Index: 1, Count: 2})
+	clock.advance(time.Second)
+	r.Retry("docs", "dial tcp 192.0.2.1:443: i/o timeout")
+	if len(saver.saved) != 2 {
+		t.Fatalf("retry not written at once: %+v", saver.saved)
+	}
+	last := saver.saved[1]
+	if last.Phase != PhaseCheck || last.LastRetry != "dial tcp 192.0.2.1:443: i/o timeout" || !last.LastRetryAt.Equal(clock.t) || !last.PhaseStarted.Equal(clock.t.Add(-time.Second)) {
+		t.Fatalf("got %+v", last)
+	}
+	// A new phase starts without the old retry.
+	r.Phase("docs", Phase{Name: PhaseBackup, Repository: "s3", Index: 1, Count: 2})
+	if last := saver.saved[len(saver.saved)-1]; last.LastRetry != "" || last.LastRetryAt != nil {
+		t.Fatalf("retry carried into the next phase: %+v", last)
+	}
+}

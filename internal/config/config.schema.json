@@ -13,6 +13,19 @@
       "minimum": 1,
       "description": "How many jobs may run at the same time on this host. Defaults to 2."
     },
+    "connect_timeout": {
+      "oneOf": [
+        {
+          "type": "string",
+          "pattern": "^(0|[0-9]+(s|m|h))$"
+        },
+        {
+          "type": "integer",
+          "enum": [0]
+        }
+      ],
+      "description": "How long each repository may take to open before a backup to it, unless the repository sets its own connect_timeout: a duration like 30s, 2m or 1h (at least 10s), or 0 to skip the check. Defaults to 2m."
+    },
     "progress_interval": {
       "oneOf": [
         {
@@ -167,6 +180,19 @@
           "additionalProperties": {
             "type": "string"
           }
+        },
+        "connect_timeout": {
+          "oneOf": [
+            {
+              "type": "string",
+              "pattern": "^(0|[0-9]+(s|m|h))$"
+            },
+            {
+              "type": "integer",
+              "enum": [0]
+            }
+          ],
+          "description": "How long this repository may take to open before each backup to it; past that it is recorded as unreachable and the job moves on. A duration like 30s, 2m or 1h (at least 10s), or 0 to skip the check. Defaults to the top-level connect_timeout, or 2m."
         }
       }
     },

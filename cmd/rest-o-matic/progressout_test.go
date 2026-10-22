@@ -184,3 +184,19 @@ func TestProgressPrinter_CutToTerminalWidth(t *testing.T) {
 		t.Fatalf("got %q", frame)
 	}
 }
+
+func TestProgressPrinter_RetryLines(t *testing.T) {
+	clock := &testClock{t: time.Date(2026, 10, 21, 9, 0, 0, 0, time.UTC)}
+	var out syncBuffer
+	p := newProgressPrinter(&out, false, nil, 5*time.Minute, clock.now)
+	p.Phase("config", execution.Phase{Name: execution.PhaseCheck, Repository: "s3", Index: 1, Count: 2})
+	for i := 0; i < 3; i++ {
+		clock.advance(30 * time.Second)
+		p.Retry("config", "dial tcp 192.0.2.1:443: i/o timeout")
+	}
+	lines := strings.Split(strings.TrimSuffix(out.String(), "\n"), "\n")
+	if len(lines) != 4 || lines[0] != "2026-10-21T09:00:00Z config: checking s3 (1 of 2)" ||
+		lines[3] != "2026-10-21T09:01:30Z config: checking s3 (1 of 2), restic is retrying: dial tcp 192.0.2.1:443: i/o timeout" {
+		t.Fatalf("got:\n%s", out.String())
+	}
+}

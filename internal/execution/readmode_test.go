@@ -88,7 +88,7 @@ func (f readModeFakes) backupCall(t *testing.T) string {
 
 func TestBackup_DirectRunsResticItself(t *testing.T) {
 	f := newReadModeFakes(t)
-	if _, err := f.runner().Backup(context.Background(), f.repo(), config.ReadDirect, config.Source{Paths: []string{"/src"}}, []string{"docs"}, nil); err != nil {
+	if _, err := f.runner().Backup(context.Background(), f.repo(), config.ReadDirect, config.Source{Paths: []string{"/src"}}, []string{"docs"}, nil, nil); err != nil {
 		t.Fatalf("Backup: %v", err)
 	}
 	want := "-r " + f.repo().URL + " backup /src --tag docs --json"
@@ -102,7 +102,7 @@ func TestBackup_DirectRunsResticItself(t *testing.T) {
 
 func TestBackup_PodmanUnshareWrapsRestic(t *testing.T) {
 	f := newReadModeFakes(t)
-	id, err := f.runner().Backup(context.Background(), f.repo(), config.ReadPodmanUnshare, config.Source{Paths: []string{"/src"}}, []string{"gitea"}, nil)
+	id, err := f.runner().Backup(context.Background(), f.repo(), config.ReadPodmanUnshare, config.Source{Paths: []string{"/src"}}, []string{"gitea"}, nil, nil)
 	if err != nil {
 		t.Fatalf("Backup: %v", err)
 	}
@@ -123,7 +123,7 @@ func TestBackup_PodmanUnshareWithoutPodmanFails(t *testing.T) {
 	f := newReadModeFakes(t)
 	r := f.runner()
 	r.Podman = filepath.Join(f.dir, "no-podman")
-	_, err := r.Backup(context.Background(), f.repo(), config.ReadPodmanUnshare, config.Source{Paths: []string{"/src"}}, []string{"gitea"}, nil)
+	_, err := r.Backup(context.Background(), f.repo(), config.ReadPodmanUnshare, config.Source{Paths: []string{"/src"}}, []string{"gitea"}, nil, nil)
 	if err == nil || !strings.Contains(err.Error(), "needs podman") {
 		t.Fatalf("expected a needs-podman error, got %v", err)
 	}
@@ -159,10 +159,11 @@ func TestRunJob_ReadModeTag(t *testing.T) {
 			if hasTag != tc.wrapped {
 				t.Errorf("read-mode tag present = %v, want %v", hasTag, tc.wrapped)
 			}
-			// Only the backup is wrapped; forget always runs directly.
+			// The check and the backup read through the read mode; forget
+			// always runs directly.
 			podmanCalls := f.calls(t, "podman")
-			if tc.wrapped && (len(podmanCalls) != 1 || !strings.Contains(podmanCalls[0], " backup ")) {
-				t.Errorf("expected podman to wrap only the backup, got %q", podmanCalls)
+			if tc.wrapped && (len(podmanCalls) != 2 || !strings.Contains(podmanCalls[0], " cat config ") || !strings.Contains(podmanCalls[1], " backup ")) {
+				t.Errorf("expected podman to wrap the check and the backup only, got %q", podmanCalls)
 			}
 			if !tc.wrapped && podmanCalls != nil {
 				t.Errorf("expected podman not to run for a direct job, got %q", podmanCalls)
@@ -305,11 +306,11 @@ func TestExec_RestoreReadModeCheck(t *testing.T) {
 		t.Fatal(err)
 	}
 	direct := NewResticRunner()
-	untagged, err := direct.Backup(context.Background(), repo, config.ReadDirect, config.Source{Paths: []string{src}}, []string{"gitea"}, nil)
+	untagged, err := direct.Backup(context.Background(), repo, config.ReadDirect, config.Source{Paths: []string{src}}, []string{"gitea"}, nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	tagged, err := direct.Backup(context.Background(), repo, config.ReadDirect, config.Source{Paths: []string{src}}, []string{"gitea", readModeTag(config.ReadPodmanUnshare)}, nil)
+	tagged, err := direct.Backup(context.Background(), repo, config.ReadDirect, config.Source{Paths: []string{src}}, []string{"gitea", readModeTag(config.ReadPodmanUnshare)}, nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

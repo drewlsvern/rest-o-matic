@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/drewlsvern/rest-o-matic/internal/color"
@@ -178,6 +179,11 @@ func runRecord(r execution.JobResult, started, finished time.Time, trigger strin
 			SnapshotID: ro.SnapshotID,
 		}
 		switch {
+		case ro.Unreachable:
+			// status says "unreachable (checked for …)" itself; the error
+			// is restic's reason alone.
+			repo.Result, repo.CheckTimeout = state.ResultUnreachable, config.FormatInterval(ro.CheckTimeout)
+			repo.Error = strings.Join(strings.Fields(ro.BackupErr.Error()), " ")
 		case ro.BackupErr != nil:
 			repo.Result = state.ResultBackupFailed
 		case ro.ForgetErr != nil:
@@ -216,6 +222,8 @@ func printResult(r execution.JobResult) {
 	}
 	for _, ro := range r.Repos {
 		switch {
+		case ro.Unreachable:
+			fmt.Printf("  repository %s: %s (checked for %s): %v\n", ro.Repository, color.Stdout.Error("unreachable"), config.FormatInterval(ro.CheckTimeout), ro.BackupErr)
 		case ro.BackupErr != nil:
 			fmt.Printf("  repository %s: %s: %v\n", ro.Repository, color.Stdout.Error("backup failed"), ro.BackupErr)
 		case ro.ForgetErr != nil:

@@ -3,9 +3,7 @@
 ## Purpose
 
 Lets one set of notification commands cover every job, so that a failing backup is reported without each job needing its own hook, a job that keeps failing does not flood its owner with alerts, and its recovery is reported too.
-
 ## Requirements
-
 ### Requirement: Notifications Apply to Every Job
 The commands in the top-level `notify` block SHALL apply to every job in the config, whether the job is started by `tick` or by `run`. A job SHALL NOT need any configuration of its own for them to apply, and there SHALL be no way for a job to opt out. A job's own hooks SHALL be unaffected and SHALL still run on every run.
 
@@ -78,13 +76,18 @@ The `success` commands SHALL run after every successful run of every job, with n
 Notification commands SHALL run through the same shell as hooks, with the calling environment plus:
 - `RESTOMATIC_JOB`: the job's name;
 - `RESTOMATIC_OUTCOME`: `success` or `failure`;
-- `RESTOMATIC_FAILED_REPOS`: a comma-separated list of repositories whose backup or retention enforcement failed, empty if none;
+- `RESTOMATIC_FAILED_REPOS`: a comma-separated list of repositories whose backup or retention enforcement failed, or that were unreachable, empty if none;
+- `RESTOMATIC_UNREACHABLE_REPOS`: a comma-separated list of the repositories that were unreachable, empty if none;
 - `RESTOMATIC_ERROR`: a one-line description of the first failure, empty on success; and
 - `RESTOMATIC_FAILING_SINCE`: for `failure` and `recovery` commands, the time of the first failed run of the current or just-ended run of failures, as an RFC 3339 timestamp in UTC. Empty for `success` commands.
 
 #### Scenario: Failure command sees the job and error
 - **WHEN** the `gitea` job fails on repository `offsite`
 - **THEN** the `failure` commands SHALL see `RESTOMATIC_JOB=gitea`, `RESTOMATIC_OUTCOME=failure`, `RESTOMATIC_FAILED_REPOS=offsite`, a non-empty `RESTOMATIC_ERROR`, and `RESTOMATIC_FAILING_SINCE` set to the time of this run
+
+#### Scenario: Failure command sees an unreachable repository
+- **WHEN** the `config` job succeeds on `ut-g5` and finds `s3` unreachable
+- **THEN** the `failure` commands SHALL see `RESTOMATIC_FAILED_REPOS=s3`, `RESTOMATIC_UNREACHABLE_REPOS=s3`, and a `RESTOMATIC_ERROR` naming `s3` as unreachable
 
 #### Scenario: Failing-since stays at the first failure
 - **WHEN** a job first failed on Monday at 02:00 and is still failing when the `failure` commands run again on Tuesday
@@ -125,3 +128,4 @@ A job whose state was recorded by an earlier version, and whose last outcome is 
 #### Scenario: Job already failing before upgrade
 - **WHEN** a state file written by an earlier version records a job's last outcome as failed, and the job fails again
 - **THEN** the `failure` commands SHALL run
+

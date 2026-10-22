@@ -33,6 +33,11 @@ func resticMessages(stderr string) string {
 	seen := map[string]bool{}
 	for _, line := range strings.Split(stderr, "\n") {
 		line = strings.TrimSpace(line)
+		// A retry is restic saying it will try again, not why it failed;
+		// left in, a few of them would push the real error out of sight.
+		if retryLine.MatchString(line) {
+			continue
+		}
 		message := messageIn(line)
 		if message != "" && !seen[message] {
 			seen[message] = true

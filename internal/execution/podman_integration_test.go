@@ -64,14 +64,14 @@ func TestPodmanUnshare_BackupAndRestoreSubuidOwnedFile(t *testing.T) {
 
 	// Direct: restic can't read the file, exits 3, and the hint points at
 	// podman-unshare since podman is on PATH.
-	_, err := r.Backup(context.Background(), repo, config.ReadDirect, config.Source{Paths: []string{src}}, []string{"gitea"}, nil)
+	_, err := r.Backup(context.Background(), repo, config.ReadDirect, config.Source{Paths: []string{src}}, []string{"gitea"}, nil, nil)
 	if err == nil || !strings.Contains(err.Error(), "exit status 3") || !strings.Contains(err.Error(), "read_as: "+config.ReadPodmanUnshare) {
 		t.Fatalf("expected exit 3 with the podman-unshare hint, got %v", err)
 	}
 
 	// podman-unshare: the same file is read. The password only reaches
 	// restic if podman passes the environment through.
-	id, err := r.Backup(context.Background(), repo, config.ReadPodmanUnshare, config.Source{Paths: []string{src}}, []string{"gitea"}, nil)
+	id, err := r.Backup(context.Background(), repo, config.ReadPodmanUnshare, config.Source{Paths: []string{src}}, []string{"gitea"}, nil, nil)
 	if err != nil || id == "" {
 		t.Fatalf("expected the wrapped backup to succeed with a snapshot id, got %q, %v", id, err)
 	}
@@ -125,7 +125,7 @@ func TestPodmanUnshare_BackupWithLockedPassword(t *testing.T) {
 
 	// The backup reads a file only the namespace can read, from a
 	// repository whose password is only available locked.
-	id, err := r.Backup(context.Background(), repo, config.ReadPodmanUnshare, config.Source{Paths: []string{src}}, []string{"gitea"}, nil)
+	id, err := r.Backup(context.Background(), repo, config.ReadPodmanUnshare, config.Source{Paths: []string{src}}, []string{"gitea"}, nil, nil)
 	if err != nil || id == "" {
 		t.Fatalf("expected the wrapped backup to succeed with a snapshot id, got %q, %v", id, err)
 	}
@@ -150,7 +150,7 @@ func TestPodmanUnshare_BackupWithLockedPassword(t *testing.T) {
 	// Without the host key nothing is started, in the namespace or out.
 	keyless := NewResticRunner()
 	keyless.Secrets = secrets.NewUnlocker(filepath.Join(t.TempDir(), "missing.key"), nil)
-	_, err = keyless.Backup(context.Background(), repo, config.ReadPodmanUnshare, config.Source{Paths: []string{src}}, []string{"gitea"}, nil)
+	_, err = keyless.Backup(context.Background(), repo, config.ReadPodmanUnshare, config.Source{Paths: []string{src}}, []string{"gitea"}, nil, nil)
 	if err == nil || !strings.Contains(err.Error(), "password is locked") {
 		t.Fatalf("backup without the host key: got %v, want it refused because the password is locked", err)
 	}
@@ -199,7 +199,7 @@ wait
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan error, 1)
 	go func() {
-		_, err := (&ResticRunner{Path: fake}).Backup(ctx, repo, config.ReadPodmanUnshare, config.Source{Paths: []string{dir}}, []string{"job"}, nil)
+		_, err := (&ResticRunner{Path: fake}).Backup(ctx, repo, config.ReadPodmanUnshare, config.Source{Paths: []string{dir}}, []string{"job"}, nil, nil)
 		done <- err
 	}()
 

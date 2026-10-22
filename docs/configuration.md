@@ -9,6 +9,7 @@ backup and an application-aware one with hooks and per-repository retention:
 ```yaml
 max_concurrent: 2   # how many jobs may run at once across the whole host
 progress_interval: 5m   # how often run and tick log a job's progress (see below)
+connect_timeout: 2m     # how long a repository may take to open before a backup (see below)
 
 policies:
   hot:
@@ -92,6 +93,50 @@ logs each job's progress at every change of phase, and every
 It doesn't change the line redrawn on a terminal, or how up to date
 [`status`](status.md#a-running-jobs-progress) is: a running job records its
 progress every 5 seconds whatever this is set to.
+
+## Unreachable repositories
+
+Before each backup to a repository, rest-o-matic checks that restic can open
+it: the same connection, credentials and key a backup uses, reading only the
+repository's small config file and taking no lock. If that hasn't finished
+within `connect_timeout`, the repository is recorded as **unreachable**, its
+backup is skipped, and the job carries on with its next repository:
+
+```
+job config: FAILED
+  repository s3: unreachable (checked for 2m): Stat: Get "https://s3.example.com/b/?location=": dial tcp 192.0.2.10:443: i/o timeout
+  repository nas: ok
+```
+
+Without the check, restic would keep retrying a repository that doesn't
+answer for about 14 minutes (restic 0.19) before giving up, on every run of
+every job that uses it. The reason shown is restic's own: the last retry
+message it printed while it tried.
+
+- `connect_timeout` is a duration (`30s`, `2m`, `1h`, at least `10s`), or
+  `0` to skip the check. It defaults to `2m`.
+- Set it at the top level for every repository, or on a repository to
+  override that:
+
+  ```yaml
+  connect_timeout: 1m
+  repositories:
+    nas:
+      backend: local
+      url: /mnt/nas/restic-repo
+      connect_timeout: 5m    # a NAS that is slow to wake up
+  ```
+
+- Local repositories are checked too. A `local` path is often a network
+  share (NFS, SMB, autofs), which can hang just like a server that doesn't
+  answer. For a repository that really is on a local disk, the check takes
+  well under a second.
+- If restic fails straight away instead, for example with a wrong password
+  or a repository that doesn't exist, that's an ordinary backup failure with
+  restic's message, not "unreachable".
+- With restic 0.16, a server that doesn't answer makes restic give up on its
+  own after its first connection timeout, usually within the 2 minutes. That
+  is recorded as a backup failure with restic's `i/o timeout` message.
 
 ## Leaving things out
 
@@ -187,7 +232,9 @@ hooks:
 - Every command in `always`, `success` and `failure` runs even if an earlier
   one fails.
 - Hooks get `RESTOMATIC_JOB`; `success`/`failure` also get
-  `RESTOMATIC_OUTCOME`, `RESTOMATIC_FAILED_REPOS` and `RESTOMATIC_ERROR`.
+  `RESTOMATIC_OUTCOME`, `RESTOMATIC_FAILED_REPOS` (every repository that
+  failed, unreachable ones included), `RESTOMATIC_UNREACHABLE_REPOS` (only
+  the [unreachable](#unreachable-repositories) ones) and `RESTOMATIC_ERROR`.
 - If rest-o-matic is stopped (SIGTERM or Ctrl-C), it stops the running backup,
   starts no further jobs, then runs `always` and `failure` for up to 60
   seconds before exiting; the job is recorded as failed. A second signal skips
