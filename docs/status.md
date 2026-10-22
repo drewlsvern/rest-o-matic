@@ -27,7 +27,11 @@ postgres   hourly    1 hour ago      ok       8s     due since 19:00
   are in UTC (a daily job is due from 00:00 UTC); they are shown here in
   your local time.
 - A failed job lists the result for each repository it tried, or the error
-  of whatever else failed (a hook, an interruption).
+  of whatever else failed (a hook, an interruption). When some of its
+  repositories still worked, OUTCOME says how many: `FAILED (1 of 2 ok)`.
+  A repository that couldn't be opened in time shows as
+  `unreachable (checked for 2m)`, with restic's reason (see
+  [Unreachable repositories](configuration.md#unreachable-repositories)).
 - A job that has started is shown as `running`, with where it has got to
   (see [A running job's progress](#a-running-jobs-progress)); one queued
   behind a busy repository or slot is shown as `waiting` (see
@@ -43,16 +47,37 @@ started it:
 
 ```
 config     daily     1 day ago       ok       2h4m   due since 00:00
-  running since 1 hour ago (started by tick): backing up to s3 (1 of 2), 43%, 3.4 GiB of 7.9 GiB, about 1 hour left
+  running since 1 hour ago (started by tick): backing up to s3 (1 of 2), 43%, 3.4 GiB of 7.9 GiB, 12.4 MiB/s, about 1 hour left
 mssql-dev  weekly    6 days ago      ok       3m10s  due since 00:00
   running since 2 minutes ago (started by tick): before hooks
 ```
 
-The phases are `before hooks`, `backing up to <repository> (i of n)`,
+The phases are `before hooks`, `checking <repository> (i of n)` (the
+[connection check](configuration.md#unreachable-repositories), usually over
+in under a second), `backing up to <repository> (i of n)`,
 `applying retention on <repository> (i of n)` and `after hooks`. During a
 backup the figures are restic's own and at most a few seconds old. The total
 grows while restic is still counting files, so the percentage can drop back
 early in a run.
+
+The rate (`12.4 MiB/s`) is how much restic has read divided by how long the
+backup has run. On a first backup, or one that is waiting on its uploads,
+that is about the upload speed. On a backup of mostly unchanged files it is
+much higher, because restic skips unchanged files quickly.
+
+While restic is retrying something, typically a connection, its latest
+reason is shown until it reports progress again:
+
+```
+  running since 1 minute ago (started by run): checking s3 (1 of 2), restic is retrying: Stat: Get "https://s3.example.com/b/?location=": dial tcp 192.0.2.10:443: i/o timeout
+```
+
+A backup that restic hasn't reported on at all for over a minute says so,
+since restic sends nothing while it opens a repository or loads its index:
+
+```
+  running since 4 minutes ago (started by tick): backing up to s3 (1 of 2), no report from restic yet (3 minutes)
+```
 
 When restic's figures haven't moved for over a minute, the time left is
 replaced by how long they have stood still:
@@ -119,11 +144,17 @@ document, with full snapshot IDs and untruncated errors, for scripts and
 monitoring. Times are UTC, and values that don't apply are `null`.
 
 A running job's `running` entry has a `progress` object once the job has
-recorded any: `phase` (`before_hooks`, `backup`, `forget` or
-`after_hooks`), `repository`, `repository_index` and `repositories`,
-restic's `percent_done`, `bytes_done`, `total_bytes`, `files_done`,
-`total_files`, `seconds_remaining` and `current_files`, and the times
-`updated`, `last_report` and `last_moved`. It isn't sent to the central app.
+recorded any: `phase` (`before_hooks`, `check`, `backup`, `forget` or
+`after_hooks`) and `phase_started`, `repository`, `repository_index` and
+`repositories`, restic's `percent_done`, `bytes_done`, `total_bytes`,
+`files_done`, `total_files`, `seconds_elapsed`, `seconds_remaining` and
+`current_files`, the times `updated`, `last_report` and `last_moved`, and
+restic's latest retry message, `last_retry`, seen at `last_retry_at`. It
+isn't sent to the central app.
+
+A repository result is `ok`, `unreachable`, `backup_failed` or
+`forget_failed`; an `unreachable` one also has `check_timeout`, how long it
+was tried for (`2m`).
 
 Every job carries a `snapshot_lists` entry for each of its repositories,
 with when the list was taken, how many snapshots it holds and the newest

@@ -7,6 +7,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -146,10 +147,11 @@ func (r *ResticRunner) reveal(field string, s config.Secret) (string, error) {
 // leaving out what its exclusions match, and tags the resulting snapshot
 // with every tag supplied (the caller is responsible for including the
 // automatic job-name tag alongside any user tags). restic's progress
-// reports go to onStatus as they arrive, when it is non-nil. restic's
+// reports go to onStatus and its retry messages to onRetry as they
+// arrive, each when non-nil. restic's
 // own stderr output is preserved on failure per the design's "surface
 // restic's errors, don't reinterpret them" decision.
-func (r *ResticRunner) Backup(ctx context.Context, repo config.Repository, mode string, src config.Source, tags []string, onStatus func(BackupStatus)) (snapshotID string, err error) {
+func (r *ResticRunner) Backup(ctx context.Context, repo config.Repository, mode string, src config.Source, tags []string, onStatus func(BackupStatus), onRetry func(string)) (snapshotID string, err error) {
 	args := []string{"-r", repo.URL, "backup"}
 	args = append(args, src.Paths...)
 	for _, p := range src.Exclude {
@@ -180,13 +182,13 @@ func (r *ResticRunner) Backup(ctx context.Context, repo config.Repository, mode 
 	} else {
 		configureWrappedResticCancel(cmd)
 	}
-	stdout := &backupOutput{onStatus: onStatus}
-	var stderr bytes.Buffer
+	stdout, stderr := newBackupOutput(onStatus), newStderrOutput(onRetry)
 	cmd.Stdout = stdout
-	cmd.Stderr = &stderr
+	cmd.Stderr = stderr
 
 	runErr := cmd.Run()
 	stdout.close()
+	stderr.close()
 	if runErr != nil {
 		err := resticFailure("restic backup failed", runErr, stderr.String())
 		if hint := unreadableHint(runErr, stderr.String(), mode); hint != "" {
@@ -195,6 +197,55 @@ func (r *ResticRunner) Backup(ctx context.Context, repo config.Repository, mode 
 		return "", err
 	}
 	return stdout.snapshotID, nil
+}
+
+// ErrUnreachable marks a check that ran out of time: the repository
+// couldn't be opened within its connect_timeout.
+var ErrUnreachable = errors.New("unreachable")
+
+// Check opens repo the way a backup would, by having restic read the
+// repository's config, without taking a lock. It is stopped when timeout
+// passes, and then returns an error wrapping ErrUnreachable whose text is
+// restic's last retry message, or says it gave none.
+// Other failures are restic's own, reported as for a backup. restic's retry
+// messages go to onRetry, when non-nil, as they arrive.
+func (r *ResticRunner) Check(ctx context.Context, repo config.Repository, mode string, timeout time.Duration, onRetry func(string)) error {
+	env, err := r.repoEnv(repo)
+	if err != nil {
+		return err
+	}
+	checkCtx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+	cmd, err := r.command(checkCtx, mode, []string{"-r", repo.URL, "cat", "config", "--no-lock"})
+	if err != nil {
+		return err
+	}
+	cmd.Env = env
+	if mode == "" || mode == config.ReadDirect {
+		configureResticCancel(cmd)
+	} else {
+		configureWrappedResticCancel(cmd)
+	}
+	stderr := newStderrOutput(onRetry)
+	cmd.Stdout = io.Discard
+	cmd.Stderr = stderr
+
+	runErr := cmd.Run()
+	stderr.close()
+	switch {
+	case runErr == nil:
+		return nil
+	case ctx.Err() != nil:
+		// Interrupted: the job is stopping, which isn't the repository's
+		// fault.
+		return fmt.Errorf("restic check stopped: %w", context.Cause(ctx))
+	case errors.Is(checkCtx.Err(), context.DeadlineExceeded):
+		if stderr.lastRetry != "" {
+			return fmt.Errorf("%w: %s", ErrUnreachable, stderr.lastRetry)
+		}
+		return fmt.Errorf("%w: restic gave no reason before it was stopped", ErrUnreachable)
+	}
+	return resticFailure("restic could not open the repository", runErr, stderr.String())
 }
 
 // hostGOOS and lookPath are runtime.GOOS and exec.LookPath; variables so

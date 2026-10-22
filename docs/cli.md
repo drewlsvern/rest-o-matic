@@ -65,12 +65,15 @@ lines under it), so a script that reads them is unaffected.
 On a terminal, one line is redrawn in place:
 
 ```
-config: backing up to s3 (1 of 2), 43%, 3.4 GiB of 7.9 GiB, about 1 hour left
+config: backing up to s3 (1 of 2), 43%, 3.4 GiB of 7.9 GiB, 12.4 MiB/s, about 1 hour left
 ```
 
+It says what [`status`](status.md#a-running-jobs-progress) says, including
+`restic is retrying: …` while restic retries a connection.
+
 When standard error goes to a file or a pipe, complete lines are written
-instead: one each time a job moves to another phase, and one for each job
-in a backup every [`progress_interval`](configuration.md#progress-lines)
+instead: one each time a job moves to another phase, one for each retry
+message restic prints, and one for each job in a backup every [`progress_interval`](configuration.md#progress-lines)
 (5 minutes by default):
 
 ```

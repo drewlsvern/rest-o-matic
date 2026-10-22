@@ -194,11 +194,15 @@ type progressStatus struct {
 	TotalBytes       int64      `json:"total_bytes"`
 	FilesDone        int64      `json:"files_done"`
 	TotalFiles       int64      `json:"total_files"`
+	SecondsElapsed   int64      `json:"seconds_elapsed"`
 	SecondsRemaining *int64     `json:"seconds_remaining"`
 	CurrentFiles     []string   `json:"current_files"`
+	PhaseStarted     *time.Time `json:"phase_started"`
 	Updated          time.Time  `json:"updated"`
 	LastReport       *time.Time `json:"last_report"`
 	LastMoved        *time.Time `json:"last_moved"`
+	LastRetry        *string    `json:"last_retry"`
+	LastRetryAt      *time.Time `json:"last_retry_at"`
 }
 
 func progressStatusOf(p *state.Progress) *progressStatus {
@@ -208,9 +212,17 @@ func progressStatusOf(p *state.Progress) *progressStatus {
 	ps := &progressStatus{
 		Phase:       p.Phase,
 		PercentDone: p.PercentDone, BytesDone: p.BytesDone, TotalBytes: p.TotalBytes,
-		FilesDone: p.FilesDone, TotalFiles: p.TotalFiles, SecondsRemaining: p.SecondsRemaining,
+		FilesDone: p.FilesDone, TotalFiles: p.TotalFiles,
+		SecondsElapsed: p.SecondsElapsed, SecondsRemaining: p.SecondsRemaining,
 		CurrentFiles: orEmpty(p.CurrentFiles),
 		Updated:      utc(p.Updated), LastReport: utcPtr(p.LastReport), LastMoved: utcPtr(p.LastMoved),
+		LastRetryAt: utcPtr(p.LastRetryAt),
+	}
+	if !p.PhaseStarted.IsZero() {
+		ps.PhaseStarted = utcPtr(&p.PhaseStarted)
+	}
+	if p.LastRetry != "" {
+		ps.LastRetry = strPtr(p.LastRetry)
 	}
 	if p.Repository != "" {
 		ps.Repository, ps.RepositoryIndex, ps.Repositories = strPtr(p.Repository), &p.RepositoryIndex, &p.Repositories
@@ -234,6 +246,10 @@ type repoStatus struct {
 	Result     string  `json:"result"`
 	Error      *string `json:"error"`
 	SnapshotID *string `json:"snapshot_id"`
+	// CheckTimeout is how long an unreachable repository was tried for.
+	// Left out for other results, so that what the check-in sends for
+	// them is as before.
+	CheckTimeout *string `json:"check_timeout,omitempty"`
 }
 
 // buildStatus assembles the report for every configured job, or for only
@@ -359,10 +375,11 @@ func runStatuses(js state.JobState) []runStatus {
 		}
 		for _, repo := range r.Repositories {
 			run.Repositories = append(run.Repositories, repoStatus{
-				Name:       repo.Name,
-				Result:     repo.Result,
-				Error:      strPtr(repo.Error),
-				SnapshotID: strPtr(repo.SnapshotID),
+				Name:         repo.Name,
+				Result:       repo.Result,
+				Error:        strPtr(repo.Error),
+				SnapshotID:   strPtr(repo.SnapshotID),
+				CheckTimeout: strPtr(repo.CheckTimeout),
 			})
 		}
 		runs = append(runs, run)
@@ -456,7 +473,7 @@ func writeStatus(w io.Writer, r statusReport, p color.Painter, loc *time.Locatio
 		lastRun, took := "never", "-"
 		outcome := cell{text: "-"}
 		if run := job.LastRun; run != nil {
-			lastRun, took, outcome = ago(now.Sub(run.Finished)), duration(*run), outcomeCell(run.Outcome, p)
+			lastRun, took, outcome = ago(now.Sub(run.Finished)), duration(*run), outcomeCell(*run, p)
 		}
 		var notes []string
 		if note := activity(job, now); note != "" {
@@ -508,7 +525,7 @@ func writeJobHistory(w io.Writer, r statusReport, p color.Painter, loc *time.Loc
 		} else {
 			notes = failureNotes(run)
 		}
-		t.add(notes, cell{text: started}, cell{text: duration(run)}, outcomeCell(run.Outcome, p), cell{text: by})
+		t.add(notes, cell{text: started}, cell{text: duration(run)}, outcomeCell(run, p), cell{text: by})
 	}
 	if len(job.Runs) > 0 {
 		t.write(w)
@@ -576,9 +593,21 @@ func humanBytes(n int64) string {
 	return fmt.Sprintf("%.1f %s", value, suffix)
 }
 
-func outcomeCell(outcome string, p color.Painter) cell {
-	if outcome == state.OutcomeSuccess {
+// outcomeCell is a run's outcome. A failed run where some repositories
+// still succeeded says how many, so that one repository being down doesn't
+// read the same as nothing backed up.
+func outcomeCell(run runStatus, p color.Painter) cell {
+	if run.Outcome == state.OutcomeSuccess {
 		return cell{text: "ok", paint: p.Success}
+	}
+	ok := 0
+	for _, repo := range run.Repositories {
+		if repo.Result == state.ResultOK {
+			ok++
+		}
+	}
+	if ok > 0 {
+		return cell{text: fmt.Sprintf("FAILED (%d of %d ok)", ok, len(run.Repositories)), paint: p.Error}
 	}
 	return cell{text: "FAILED", paint: p.Error}
 }
@@ -611,6 +640,7 @@ func progressSummary(p progressStatus, now time.Time) string {
 	if p.Repository != nil {
 		where = fmt.Sprintf(" %s (%d of %d)", *p.Repository, *p.RepositoryIndex, *p.Repositories)
 	}
+	var parts []string
 	switch p.Phase {
 	case execution.PhaseBeforeHooks:
 		return "before hooks"
@@ -618,15 +648,37 @@ func progressSummary(p progressStatus, now time.Time) string {
 		return "after hooks"
 	case execution.PhaseForget:
 		return "applying retention on" + where
+	case execution.PhaseCheck:
+		parts = []string{"checking" + where}
 	case execution.PhaseBackup:
+		parts = append(parts, backupSummary(p, where, now)...)
 	default:
 		return p.Phase
 	}
+	if retry := retrying(p); retry != "" {
+		parts = append(parts, "restic is retrying: "+clip(retry))
+	}
+	return strings.Join(parts, ", ")
+}
+
+// minRateSeconds is how long a backup must have run before its throughput
+// is shown; the first seconds' figures say little.
+const minRateSeconds = 5
+
+// backupSummary is how far a backup has got: where it is, then restic's
+// figures, its throughput, and the time left or why there is none.
+func backupSummary(p progressStatus, where string, now time.Time) []string {
 	parts := []string{"backing up to" + where}
 	if p.LastReport == nil {
-		return parts[0]
+		if p.PhaseStarted != nil && now.Sub(*p.PhaseStarted) > pauseShownAfter {
+			parts = append(parts, "no report from restic yet ("+span(now.Sub(*p.PhaseStarted))+")")
+		}
+		return parts
 	}
 	parts = append(parts, fmt.Sprintf("%d%%", int(p.PercentDone*100)), humanBytes(p.BytesDone)+" of "+humanBytes(p.TotalBytes))
+	if p.SecondsElapsed >= minRateSeconds {
+		parts = append(parts, humanBytes(p.BytesDone/p.SecondsElapsed)+"/s")
+	}
 	switch {
 	case p.LastMoved != nil && now.Sub(*p.LastMoved) > pauseShownAfter:
 		parts = append(parts, "no progress reported for "+span(now.Sub(*p.LastMoved)))
@@ -635,7 +687,16 @@ func progressSummary(p progressStatus, now time.Time) string {
 	case p.SecondsRemaining != nil:
 		parts = append(parts, "about "+span(time.Duration(*p.SecondsRemaining)*time.Second)+" left")
 	}
-	return strings.Join(parts, ", ")
+	return parts
+}
+
+// retrying is restic's latest retry message while it is still the latest
+// news: once restic reports progress again, the retry is over.
+func retrying(p progressStatus) string {
+	if p.LastRetry == nil || p.LastRetryAt == nil || p.LastReport != nil && !p.LastRetryAt.After(*p.LastReport) {
+		return ""
+	}
+	return *p.LastRetry
 }
 
 // progressDetail is what `status <job>` adds about a running job's
@@ -650,6 +711,9 @@ func progressDetail(p progressStatus, now time.Time) []string {
 	}
 	if p.LastMoved != nil {
 		lines = append(lines, "figures last moved "+ago(now.Sub(*p.LastMoved)))
+	}
+	if retrying(p) != "" {
+		lines = append(lines, "restic last retried "+ago(now.Sub(*p.LastRetryAt)))
 	}
 	return lines
 }
@@ -684,6 +748,11 @@ func repoNotes(run runStatus) []string {
 			note += "backup failed"
 		case state.ResultForgetFailed:
 			note += "backup ok, retention failed"
+		case state.ResultUnreachable:
+			note += "unreachable"
+			if repo.CheckTimeout != nil {
+				note += " (checked for " + *repo.CheckTimeout + ")"
+			}
 		default:
 			note += repo.Result
 		}

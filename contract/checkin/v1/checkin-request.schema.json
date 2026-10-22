@@ -365,7 +365,7 @@
               },
               "result": {
                 "type": "string",
-                "description": "ok, backup_failed or forget_failed"
+                "description": "ok, unreachable, backup_failed or forget_failed. unreachable: the repository couldn't be opened within its connect_timeout, so no backup was tried; error is restic's last word on why. More values may be added; treat one you don't know as a failure."
               },
               "error": {
                 "type": [
@@ -378,6 +378,10 @@
                   "string",
                   "null"
                 ]
+              },
+              "check_timeout": {
+                "type": "string",
+                "description": "For an unreachable repository only: how long it was tried for, as in the config (2m). Absent for other results."
               }
             }
           }

@@ -27,6 +27,9 @@ const (
 	ResultOK           = "ok"
 	ResultBackupFailed = "backup_failed"
 	ResultForgetFailed = "forget_failed"
+	// ResultUnreachable is a repository that couldn't be opened within its
+	// connect_timeout, so no backup was tried.
+	ResultUnreachable = "unreachable"
 )
 
 // MaxRuns is how many of a job's most recent runs are kept.
@@ -41,6 +44,9 @@ type RepoResult struct {
 	Error string `json:"error,omitempty"`
 	// SnapshotID is the snapshot the backup created, if it got that far.
 	SnapshotID string `json:"snapshot_id,omitempty"`
+	// CheckTimeout is how long an unreachable repository was tried for,
+	// as in the config (2m); empty for other results.
+	CheckTimeout string `json:"check_timeout,omitempty"`
 }
 
 // RunRecord is one finished execution of a job.

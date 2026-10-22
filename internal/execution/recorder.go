@@ -50,14 +50,30 @@ func (r *Recorder) Phase(job string, p Phase) {
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	r.cur = PhaseProgress(p)
+	r.cur = PhaseProgress(p, r.now())
 	r.write()
 }
 
-// PhaseProgress is the progress at the start of phase p: where the job
-// is, with no figures yet.
-func PhaseProgress(p Phase) state.Progress {
-	return state.Progress{Phase: p.Name, Repository: p.Repository, RepositoryIndex: p.Index, Repositories: p.Count}
+// Retry records one of restic's retry messages, and writes it at once.
+func (r *Recorder) Retry(job, message string) {
+	if job != r.job {
+		return
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	ApplyRetry(&r.cur, message, r.now())
+	r.write()
+}
+
+// PhaseProgress is the progress at the start of phase p, begun at now:
+// where the job is, with no figures yet.
+func PhaseProgress(p Phase, now time.Time) state.Progress {
+	return state.Progress{Phase: p.Name, Repository: p.Repository, RepositoryIndex: p.Index, Repositories: p.Count, PhaseStarted: now}
+}
+
+// ApplyRetry records that restic printed a retry message at now.
+func ApplyRetry(cur *state.Progress, message string, now time.Time) {
+	cur.LastRetry, cur.LastRetryAt = message, &now
 }
 
 // ApplyStatus updates cur with one of restic's reports, received at now:
@@ -68,7 +84,7 @@ func ApplyStatus(cur *state.Progress, s BackupStatus, now time.Time) {
 	cur.PercentDone = s.PercentDone
 	cur.BytesDone, cur.TotalBytes = s.BytesDone, s.TotalBytes
 	cur.FilesDone, cur.TotalFiles = s.FilesDone, s.TotalFiles
-	cur.SecondsRemaining = s.SecondsRemaining
+	cur.SecondsElapsed, cur.SecondsRemaining = s.SecondsElapsed, s.SecondsRemaining
 	if len(s.CurrentFiles) > 0 {
 		cur.CurrentFiles = s.CurrentFiles
 	}

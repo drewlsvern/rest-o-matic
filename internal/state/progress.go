@@ -16,19 +16,21 @@ const progressDirName = "progress"
 // Progress is where a running job is, as last recorded. The backup
 // figures are restic's own and are zero outside a backup.
 type Progress struct {
-	// Phase is before_hooks, backup, forget or after_hooks. Repository,
-	// RepositoryIndex (1-based) and Repositories are set for backup and
-	// forget.
-	Phase           string `json:"phase"`
-	Repository      string `json:"repository,omitempty"`
-	RepositoryIndex int    `json:"repository_index,omitempty"`
-	Repositories    int    `json:"repositories,omitempty"`
+	// Phase is before_hooks, check, backup, forget or after_hooks.
+	// Repository, RepositoryIndex (1-based) and Repositories are set for
+	// check, backup and forget. PhaseStarted is when the phase began.
+	Phase           string    `json:"phase"`
+	Repository      string    `json:"repository,omitempty"`
+	RepositoryIndex int       `json:"repository_index,omitempty"`
+	Repositories    int       `json:"repositories,omitempty"`
+	PhaseStarted    time.Time `json:"phase_started,omitzero"`
 
 	PercentDone      float64  `json:"percent_done"`
 	BytesDone        int64    `json:"bytes_done"`
 	TotalBytes       int64    `json:"total_bytes"`
 	FilesDone        int64    `json:"files_done"`
 	TotalFiles       int64    `json:"total_files"`
+	SecondsElapsed   int64    `json:"seconds_elapsed,omitempty"`
 	SecondsRemaining *int64   `json:"seconds_remaining,omitempty"`
 	CurrentFiles     []string `json:"current_files,omitempty"`
 
@@ -38,6 +40,11 @@ type Progress struct {
 	Updated    time.Time  `json:"updated"`
 	LastReport *time.Time `json:"last_report,omitempty"`
 	LastMoved  *time.Time `json:"last_moved,omitempty"`
+
+	// LastRetry is the latest message restic printed before retrying an
+	// operation in this phase, and LastRetryAt when it was seen.
+	LastRetry   string     `json:"last_retry,omitempty"`
+	LastRetryAt *time.Time `json:"last_retry_at,omitempty"`
 }
 
 func (s *Store) progressPath(jobName string) string {

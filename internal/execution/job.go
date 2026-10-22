@@ -2,6 +2,7 @@ package execution
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -72,18 +73,30 @@ type RepoOutcome struct {
 	SnapshotsListed bool
 	BackupErr       error
 	ForgetErr       error
+	// Unreachable is set when the repository couldn't be opened within
+	// CheckTimeout; BackupErr then holds restic's last word on why.
+	Unreachable  bool
+	CheckTimeout time.Duration
 }
 
 // FailureSummary is a one-line description of what failed against this
 // repository, empty if nothing did.
 func (o RepoOutcome) FailureSummary() string {
 	switch {
+	case o.Unreachable:
+		return oneLine(o.unreachableText())
 	case o.BackupErr != nil:
 		return oneLine(o.BackupErr.Error())
 	case o.ForgetErr != nil:
 		return oneLine(o.ForgetErr.Error())
 	}
 	return ""
+}
+
+// unreachableText says the repository was unreachable, for how long it
+// was tried, and restic's reason.
+func (o RepoOutcome) unreachableText() string {
+	return fmt.Sprintf("unreachable (checked for %s): %v", config.FormatInterval(o.CheckTimeout), o.BackupErr)
 }
 
 func (o RepoOutcome) ok() bool {
@@ -275,15 +288,19 @@ func outcomeEnvVars(r JobResult) []string {
 	if !r.Success() {
 		outcome = "failure"
 	}
-	var failed []string
+	var failed, unreachable []string
 	for _, ro := range r.Repos {
 		if !ro.ok() {
 			failed = append(failed, ro.Repository)
+		}
+		if ro.Unreachable {
+			unreachable = append(unreachable, ro.Repository)
 		}
 	}
 	return []string{
 		"RESTOMATIC_OUTCOME=" + outcome,
 		"RESTOMATIC_FAILED_REPOS=" + strings.Join(failed, ","),
+		"RESTOMATIC_UNREACHABLE_REPOS=" + strings.Join(unreachable, ","),
 		"RESTOMATIC_ERROR=" + r.FailureSummary(),
 	}
 }
@@ -306,6 +323,8 @@ func firstFailure(r JobResult) string {
 	}
 	for _, ro := range r.Repos {
 		switch {
+		case ro.Unreachable:
+			return fmt.Sprintf("repository %s: %s", ro.Repository, ro.unreachableText())
 		case ro.BackupErr != nil:
 			return fmt.Sprintf("repository %s: %v", ro.Repository, ro.BackupErr)
 		case ro.ForgetErr != nil:
@@ -336,12 +355,29 @@ func runRepo(ctx context.Context, cfg *config.Config, jobName, repoName string, 
 	repo := cfg.Repositories[repoName]
 	job := cfg.Backups[jobName]
 
-	opts.phase(jobName, Phase{Name: PhaseBackup, Repository: repoName, Index: index, Count: count})
 	var onStatus func(BackupStatus)
+	var onRetry func(string)
 	if opts.Progress != nil {
 		onStatus = func(s BackupStatus) { opts.Progress.BackupStatus(jobName, s) }
+		onRetry = func(m string) { opts.Progress.Retry(jobName, m) }
 	}
-	snapshotID, err := opts.Restic.Backup(ctx, repo, job.ReadMode(), job.Source, tags, onStatus)
+
+	// A repository that can't be opened in time is given up on here, not
+	// after restic's own retries, which run to about 14 minutes.
+	if timeout := cfg.ConnectTimeoutFor(repoName); timeout > 0 {
+		opts.phase(jobName, Phase{Name: PhaseCheck, Repository: repoName, Index: index, Count: count})
+		if err := opts.Restic.Check(ctx, repo, job.ReadMode(), timeout, onRetry); err != nil {
+			outcome.BackupErr = err
+			if errors.Is(err, ErrUnreachable) {
+				outcome.Unreachable, outcome.CheckTimeout = true, timeout
+				outcome.BackupErr = errors.New(strings.TrimPrefix(err.Error(), ErrUnreachable.Error()+": "))
+			}
+			return outcome
+		}
+	}
+
+	opts.phase(jobName, Phase{Name: PhaseBackup, Repository: repoName, Index: index, Count: count})
+	snapshotID, err := opts.Restic.Backup(ctx, repo, job.ReadMode(), job.Source, tags, onStatus, onRetry)
 	if err != nil {
 		outcome.BackupErr = err
 		return outcome

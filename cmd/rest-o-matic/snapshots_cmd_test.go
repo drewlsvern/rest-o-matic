@@ -194,8 +194,10 @@ func TestCLI_SnapshotListNeedsNoExtraResticCall(t *testing.T) {
 		t.Fatalf("run failed: %s", out)
 	}
 	data, _ := os.ReadFile(calls)
-	if got := strings.Join(strings.Fields(string(data)), " "); got != "backup forget" {
-		t.Fatalf("restic was invoked as %q, want exactly a backup and a forget", got)
+	// The connection check reads the repository's config (`cat`); listing
+	// the snapshots still costs no call of its own.
+	if got := strings.Join(strings.Fields(string(data)), " "); got != "cat backup forget" {
+		t.Fatalf("restic was invoked as %q, want exactly the check, a backup and a forget", got)
 	}
 	if _, ok := loadLists(t, workdir, "documents")["nas"]; !ok {
 		t.Fatal("no list was recorded")

@@ -47,7 +47,7 @@ not json at all
 {"message_type":"summary","snapshot_id":"abc123"}`
 	r := fakeBackupRestic(t, out, 0)
 	var got []BackupStatus
-	id, err := r.Backup(context.Background(), plainRepo(t), config.ReadDirect, config.Source{Paths: []string{"/src"}}, []string{"docs"}, func(s BackupStatus) { got = append(got, s) })
+	id, err := r.Backup(context.Background(), plainRepo(t), config.ReadDirect, config.Source{Paths: []string{"/src"}}, []string{"docs"}, func(s BackupStatus) { got = append(got, s) }, nil)
 	if err != nil {
 		t.Fatalf("Backup: %v", err)
 	}
@@ -67,7 +67,7 @@ not json at all
 
 func TestBackup_NilCallback(t *testing.T) {
 	r := fakeBackupRestic(t, `{"message_type":"status","bytes_done":1}`+"\n"+`{"message_type":"summary","snapshot_id":"abc"}`+"\n", 0)
-	id, err := r.Backup(context.Background(), plainRepo(t), config.ReadDirect, config.Source{Paths: []string{"/src"}}, []string{"docs"}, nil)
+	id, err := r.Backup(context.Background(), plainRepo(t), config.ReadDirect, config.Source{Paths: []string{"/src"}}, []string{"docs"}, nil, nil)
 	if err != nil || id != "abc" {
 		t.Fatalf("got %q, %v", id, err)
 	}
@@ -77,7 +77,7 @@ func TestBackup_FailureStillReported(t *testing.T) {
 	r := fakeBackupRestic(t, `{"message_type":"status","bytes_done":1}`+"\n", 3)
 	var mu sync.Mutex
 	n := 0
-	_, err := r.Backup(context.Background(), plainRepo(t), config.ReadDirect, config.Source{Paths: []string{"/src"}}, []string{"docs"}, func(BackupStatus) { mu.Lock(); n++; mu.Unlock() })
+	_, err := r.Backup(context.Background(), plainRepo(t), config.ReadDirect, config.Source{Paths: []string{"/src"}}, []string{"docs"}, func(BackupStatus) { mu.Lock(); n++; mu.Unlock() }, nil)
 	if err == nil || !strings.Contains(err.Error(), "exit status 3") {
 		t.Fatalf("expected restic's failure, got %v", err)
 	}
@@ -100,6 +100,12 @@ func (l *progressLog) Phase(job string, p Phase) {
 		e += " " + p.Repository + " " + strconv.Itoa(p.Index) + "/" + strconv.Itoa(p.Count)
 	}
 	l.events = append(l.events, e)
+}
+
+func (l *progressLog) Retry(job, message string) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	l.events = append(l.events, job+" retry "+message)
 }
 
 func (l *progressLog) BackupStatus(job string, s BackupStatus) {
@@ -128,7 +134,7 @@ func TestRunJob_ReportsPhases(t *testing.T) {
 			if !res.Success() {
 				t.Fatalf("job failed: %+v", res)
 			}
-			want := "docs before_hooks|docs backup nas 1/2|docs status 5|docs forget nas 1/2|docs backup offsite 2/2|docs status 5|docs forget offsite 2/2|docs after_hooks"
+			want := "docs before_hooks|docs check nas 1/2|docs backup nas 1/2|docs status 5|docs forget nas 1/2|docs check offsite 2/2|docs backup offsite 2/2|docs status 5|docs forget offsite 2/2|docs after_hooks"
 			if got := strings.Join(log.events, "|"); got != want {
 				t.Fatalf("got  %s\nwant %s", got, want)
 			}
@@ -146,7 +152,7 @@ func TestRunJob_NoHookPhasesWithoutHooks(t *testing.T) {
 	}
 	var log progressLog
 	RunJob(context.Background(), context.Background(), cfg, "docs", Options{Restic: f.runner(), LockDir: t.TempDir(), Progress: &log})
-	if got := strings.Join(log.events, "|"); got != "docs backup nas 1/1|docs status 5|docs forget nas 1/1" {
+	if got := strings.Join(log.events, "|"); got != "docs check nas 1/1|docs backup nas 1/1|docs status 5|docs forget nas 1/1" {
 		t.Fatalf("got %s", got)
 	}
 }

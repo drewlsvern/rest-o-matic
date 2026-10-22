@@ -85,7 +85,7 @@ func TestLocked_PasswordAndEnvReachResticAsPlainText(t *testing.T) {
 	}
 	runner := f.runner()
 
-	if _, err := runner.Backup(context.Background(), repo, config.ReadDirect, config.Source{Paths: []string{f.dir}}, []string{"job"}, nil); err != nil {
+	if _, err := runner.Backup(context.Background(), repo, config.ReadDirect, config.Source{Paths: []string{f.dir}}, []string{"job"}, nil, nil); err != nil {
 		t.Fatalf("Backup: %v", err)
 	}
 	if _, _, err := runner.Forget(context.Background(), repo, "job", config.Retention{"daily": 7}); err != nil {
@@ -137,7 +137,7 @@ func TestLocked_CannotUnlockFailsWithoutStartingRestic(t *testing.T) {
 	}
 	for name, c := range cases {
 		t.Run(name, func(t *testing.T) {
-			_, err := c.runner.Backup(context.Background(), c.repo, config.ReadDirect, config.Source{Paths: []string{f.dir}}, []string{"job"}, nil)
+			_, err := c.runner.Backup(context.Background(), c.repo, config.ReadDirect, config.Source{Paths: []string{f.dir}}, []string{"job"}, nil, nil)
 			if err == nil {
 				t.Fatal("expected the backup to fail")
 			}

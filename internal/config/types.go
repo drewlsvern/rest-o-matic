@@ -32,15 +32,23 @@ type Config struct {
 	// ProgressInterval is how often run and tick write a plain progress
 	// line for each job in a backup when their stderr isn't a terminal;
 	// nil means DefaultProgressInterval. See ProgressLineInterval.
-	ProgressInterval *Interval `yaml:"progress_interval"`
+	ProgressInterval *ProgressInterval `yaml:"progress_interval"`
+
+	// ConnectTimeout is how long a repository that sets none of its own
+	// may take to open before a backup; nil means DefaultConnectTimeout.
+	// See ConnectTimeoutFor.
+	ConnectTimeout *ConnectTimeout `yaml:"connect_timeout"`
 }
 
 // DefaultProgressInterval is the progress_interval used when the config
-// doesn't set one; MinProgressInterval is the shortest it may be, other
-// than 0, so that a slip can't fill a log.
+// doesn't set one, and DefaultConnectTimeout the connect_timeout.
+// MinInterval is the shortest either may be, other than 0: a shorter
+// progress_interval would let a slip fill a log, and a shorter
+// connect_timeout would fail a healthy repository on a slow handshake.
 const (
 	DefaultProgressInterval = 5 * time.Minute
-	MinProgressInterval     = 10 * time.Second
+	DefaultConnectTimeout   = 2 * time.Minute
+	MinInterval             = 10 * time.Second
 )
 
 // ProgressLineInterval is how often to write timed progress lines; 0 means
@@ -52,35 +60,79 @@ func (c *Config) ProgressLineInterval() time.Duration {
 	return time.Duration(*c.ProgressInterval)
 }
 
+// ConnectTimeoutFor is how long the named repository may take to open
+// before each backup to it: its own connect_timeout, else the top-level
+// one, else DefaultConnectTimeout. 0 means it isn't checked.
+func (c *Config) ConnectTimeoutFor(repo string) time.Duration {
+	if r, ok := c.Repositories[repo]; ok && r.ConnectTimeout != nil {
+		return time.Duration(*r.ConnectTimeout)
+	}
+	if c.ConnectTimeout != nil {
+		return time.Duration(*c.ConnectTimeout)
+	}
+	return DefaultConnectTimeout
+}
+
 // Interval is a duration written as a whole number of seconds, minutes or
-// hours (30s, 5m, 1h), or 0.
+// hours (30s, 5m, 1h), or 0. ProgressInterval and ConnectTimeout are its
+// two uses; each is its own type so that a bad value is reported under
+// the key it was found at.
 type Interval time.Duration
+
+// ProgressInterval is the progress_interval key; 0 turns timed lines off.
+type ProgressInterval Interval
+
+// ConnectTimeout is a connect_timeout key; 0 turns the check off.
+type ConnectTimeout Interval
+
+func (iv *ProgressInterval) UnmarshalYAML(value *yaml.Node) error {
+	d, err := parseInterval(value, "progress_interval", "to turn timed progress lines off")
+	*iv = ProgressInterval(d)
+	return err
+}
+
+func (iv *ConnectTimeout) UnmarshalYAML(value *yaml.Node) error {
+	d, err := parseInterval(value, "connect_timeout", "to skip the check")
+	*iv = ConnectTimeout(d)
+	return err
+}
+
+// FormatInterval writes d the way the config does: 2m, 90s, 1h.
+func FormatInterval(d time.Duration) string {
+	switch {
+	case d%time.Hour == 0 && d != 0:
+		return fmt.Sprintf("%dh", d/time.Hour)
+	case d%time.Minute == 0 && d != 0:
+		return fmt.Sprintf("%dm", d/time.Minute)
+	}
+	return fmt.Sprintf("%ds", d/time.Second)
+}
 
 var intervalRe = regexp.MustCompile(`^([0-9]+)(s|m|h)$`)
 
-func (iv *Interval) UnmarshalYAML(value *yaml.Node) error {
+// parseInterval reads an Interval for key; zeroMeans says what 0 does, for
+// the message when the value is too short.
+func parseInterval(value *yaml.Node, key, zeroMeans string) (Interval, error) {
 	n := resolve(value)
 	if n.Kind != yaml.ScalarNode {
-		return fmt.Errorf("line %d: progress_interval: must be a duration like 30s, 5m or 1h, or 0", value.Line)
+		return 0, fmt.Errorf("line %d: %s: must be a duration like 30s, 5m or 1h, or 0", value.Line, key)
 	}
 	if n.Value == "0" {
-		*iv = 0
-		return nil
+		return 0, nil
 	}
 	m := intervalRe.FindStringSubmatch(n.Value)
 	if m == nil {
-		return fmt.Errorf("line %d: progress_interval: %q is not a duration like 30s, 5m or 1h, or 0", value.Line, n.Value)
+		return 0, fmt.Errorf("line %d: %s: %q is not a duration like 30s, 5m or 1h, or 0", value.Line, key, n.Value)
 	}
 	count, err := strconv.Atoi(m[1])
 	if err != nil {
-		return fmt.Errorf("line %d: progress_interval: %q is too large", value.Line, n.Value)
+		return 0, fmt.Errorf("line %d: %s: %q is too large", value.Line, key, n.Value)
 	}
 	d := time.Duration(count) * map[string]time.Duration{"s": time.Second, "m": time.Minute, "h": time.Hour}[m[2]]
-	if d < MinProgressInterval {
-		return fmt.Errorf("line %d: progress_interval: must be at least %s, or 0 to turn timed progress lines off", value.Line, "10s")
+	if d < MinInterval {
+		return 0, fmt.Errorf("line %d: %s: must be at least 10s, or 0 %s", value.Line, key, zeroMeans)
 	}
-	*iv = Interval(d)
-	return nil
+	return Interval(d), nil
 }
 
 // Notify are commands that tell someone about a job, written once for
@@ -156,6 +208,11 @@ type Repository struct {
 	// AWS_ACCESS_KEY_ID for an s3 backend) through to the restic process.
 	// Any of its values may be locked.
 	Env map[string]Secret `yaml:"env,omitempty"`
+
+	// ConnectTimeout is how long the repository may take to open before
+	// each backup to it; nil means the top-level connect_timeout. See
+	// Config.ConnectTimeoutFor.
+	ConnectTimeout *ConnectTimeout `yaml:"connect_timeout,omitempty"`
 }
 
 // PlainTag is the YAML tag that marks an env value as deliberately not

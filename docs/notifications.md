@@ -25,7 +25,10 @@ command itself fails (the notification service is down, say), it is tried
 again on the job's next failed run instead of waiting out the day.
 
 Notification commands get the same variables as a job's `success` and
-`failure` hooks, plus `RESTOMATIC_FAILING_SINCE`: when the first run of the
+`failure` hooks (among them `RESTOMATIC_UNREACHABLE_REPOS`, the repositories
+that couldn't be [opened in time](configuration.md#unreachable-repositories),
+so a message can say "network" rather than "backup failed"), plus
+`RESTOMATIC_FAILING_SINCE`: when the first run of the
 current run of failures started (UTC, e.g. `2026-01-05T02:00:00Z`). It is
 empty for `success`.
 

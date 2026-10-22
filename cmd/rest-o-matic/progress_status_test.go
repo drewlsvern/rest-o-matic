@@ -190,3 +190,108 @@ func TestCheckin_StatusPartLeavesOutProgress(t *testing.T) {
 		t.Fatalf("progress reached the status part: fingerprint %s -> %s, %s", before, after, content)
 	}
 }
+
+func TestStatus_ThroughputAndNoReportYet(t *testing.T) {
+	now := ts(t, "2026-10-21T10:00:00Z")
+	p := backupProgress(now, 3*time.Second)
+	p.SecondsElapsed = 300 // 3.4 GiB in 5 minutes
+	r := statusWithProgress(t, now, "", heldJobs("gitea"), map[string]*state.Progress{"gitea": p})
+	if out := render(r); !strings.Contains(out, "43%, 3.4 GiB of 7.9 GiB, 11.6 MiB/s, about 1 hour left") {
+		t.Fatalf("got:\n%s", out)
+	}
+
+	// The first seconds' rate isn't shown.
+	p.SecondsElapsed = 4
+	if out := render(statusWithProgress(t, now, "", heldJobs("gitea"), map[string]*state.Progress{"gitea": p})); strings.Contains(out, "/s") {
+		t.Fatalf("rate shown after 4s:\n%s", out)
+	}
+
+	// A backup that restic hasn't reported on for over a minute says so.
+	silent := &state.Progress{Phase: "backup", Repository: "nas", RepositoryIndex: 1, Repositories: 2, PhaseStarted: now.Add(-3 * time.Minute), Updated: now}
+	if out := render(statusWithProgress(t, now, "", heldJobs("gitea"), map[string]*state.Progress{"gitea": silent})); !strings.Contains(out, "backing up to nas (1 of 2), no report from restic yet (3 minutes)") {
+		t.Fatalf("got:\n%s", out)
+	}
+	silent.PhaseStarted = now.Add(-50 * time.Second)
+	if out := render(statusWithProgress(t, now, "", heldJobs("gitea"), map[string]*state.Progress{"gitea": silent})); strings.Contains(out, "no report") {
+		t.Fatalf("no report shown after 50s:\n%s", out)
+	}
+}
+
+func TestStatus_Retrying(t *testing.T) {
+	now := ts(t, "2026-10-21T10:00:00Z")
+	seen := now.Add(-20 * time.Second)
+	checking := &state.Progress{Phase: "check", Repository: "s3", RepositoryIndex: 1, Repositories: 2, PhaseStarted: now.Add(-time.Minute),
+		Updated: seen, LastRetry: "dial tcp 192.0.2.1:443: i/o timeout", LastRetryAt: &seen}
+	r := statusWithProgress(t, now, "", heldJobs("gitea"), map[string]*state.Progress{"gitea": checking})
+	if out := render(r); !strings.Contains(out, "(started by run): checking s3 (1 of 2), restic is retrying: dial tcp 192.0.2.1:443: i/o timeout\n") {
+		t.Fatalf("got:\n%s", out)
+	}
+
+	// Once restic reports progress after the retry, the retry is over.
+	p := backupProgress(now, 3*time.Second)
+	early := p.LastReport.Add(-time.Minute)
+	p.LastRetry, p.LastRetryAt = "connection reset by peer", &early
+	if out := render(statusWithProgress(t, now, "", heldJobs("gitea"), map[string]*state.Progress{"gitea": p})); strings.Contains(out, "retrying") {
+		t.Fatalf("an old retry was shown:\n%s", out)
+	}
+	// One after the last report is shown, with its time in the detail.
+	late := now.Add(-time.Second)
+	p.LastRetryAt = &late
+	r = statusWithProgress(t, now, "gitea", heldJobs("gitea"), map[string]*state.Progress{"gitea": p})
+	var b bytes.Buffer
+	writeJobHistory(&b, r, color.NewPainter(false), time.UTC)
+	if !strings.Contains(b.String(), "restic is retrying: connection reset by peer") || !strings.Contains(b.String(), "  restic last retried just now") {
+		t.Fatalf("got:\n%s", b.String())
+	}
+
+	data, err := json.Marshal(r)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{`"last_retry":"connection reset by peer"`, `"last_retry_at":"2026-10-21T09:59:59Z"`, `"phase_started":`, `"seconds_elapsed":0`} {
+		if !strings.Contains(string(data), want) {
+			t.Errorf("JSON lacks %s: %s", want, data)
+		}
+	}
+}
+
+func TestStatus_UnreachableAndPartialFailures(t *testing.T) {
+	run := func(repos ...state.RepoResult) state.JobState {
+		return withRuns(state.RunRecord{Started: ts(t, "2026-10-21T09:00:00Z"), Finished: ts(t, "2026-10-21T09:04:10Z"),
+			Outcome: state.OutcomeFailed, Trigger: state.TriggerTick, Error: "x", Repositories: repos})
+	}
+	unreachable := state.RepoResult{Name: "offsite", Result: state.ResultUnreachable, CheckTimeout: "2m",
+		Error: `Stat: Get "https://s3.example.com/b/?location=": dial tcp 192.0.2.1:443: i/o timeout`}
+	st := &state.State{Jobs: map[string]state.JobState{
+		"gitea":     run(state.RepoResult{Name: "nas", Result: state.ResultOK, SnapshotID: "4f2a91c0aa"}, unreachable),
+		"documents": run(state.RepoResult{Name: "nas", Result: state.ResultBackupFailed, Error: "boom"}),
+		"media": withRuns(state.RunRecord{Started: ts(t, "2026-10-21T09:00:00Z"), Finished: ts(t, "2026-10-21T09:00:01Z"),
+			Outcome: state.OutcomeFailed, Trigger: state.TriggerTick, Error: "before hook failed: exit status 1"}),
+	}}
+	r := mustStatus(t, st, ts(t, "2026-10-21T09:09:00Z"), "", notHeld)
+	out := render(r)
+	for _, want := range []string{
+		"FAILED (1 of 2 ok)",
+		`  offsite: unreachable (checked for 2m): Stat: Get "https://s3.example.com/b/?location=": dial tcp 192.0.2.1:443: i/o timeout`,
+		"  nas: ok (snapshot 4f2a91c0)",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("lacks %q:\n%s", want, out)
+		}
+	}
+	for _, line := range strings.Split(out, "\n") {
+		if (strings.HasPrefix(line, "documents") || strings.HasPrefix(line, "media")) && (!strings.Contains(line, "FAILED") || strings.Contains(line, "ok)")) {
+			t.Errorf("a run with nothing ok shows a count: %q", line)
+		}
+	}
+
+	// The JSON keeps the plain outcome, and the timeout only where it applies.
+	data, err := json.Marshal(jobNamed(t, r, "gitea"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(data), `"outcome":"failed"`) || !strings.Contains(string(data), `"result":"unreachable"`) ||
+		!strings.Contains(string(data), `"check_timeout":"2m"`) || strings.Count(string(data), "check_timeout") != 1 {
+		t.Fatalf("got %s", data)
+	}
+}

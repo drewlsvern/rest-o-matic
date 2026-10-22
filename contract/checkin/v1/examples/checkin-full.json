@@ -55,6 +55,22 @@
                     "snapshot_id": "4f1a9c2b7e3d5a8c0b6f9e2d1c4a7b3e5f8d0c2a9b6e1f4d7c3a5b8e0f2d9c6a"
                   }
                 ]
+              },
+              {
+                "started": "2026-10-03T08:00:02Z",
+                "finished": "2026-10-03T08:02:04Z",
+                "outcome": "failed",
+                "trigger": "tick",
+                "error": "repository offsite: unreachable (checked for 2m): Stat: Get \"https://s3.example.com/backups/?location=\": dial tcp 192.0.2.10:443: i/o timeout",
+                "repositories": [
+                  {
+                    "name": "offsite",
+                    "result": "unreachable",
+                    "error": "Stat: Get \"https://s3.example.com/backups/?location=\": dial tcp 192.0.2.10:443: i/o timeout",
+                    "snapshot_id": null,
+                    "check_timeout": "2m"
+                  }
+                ]
               }
             ],
             "snapshot_lists": [

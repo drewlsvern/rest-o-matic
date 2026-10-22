@@ -172,7 +172,7 @@ func TestStatus_FailedRunShowsEachRepository(t *testing.T) {
 	out := render(mustStatus(t, st, ts(t, "2026-10-01T19:04:00Z"), "", notHeld))
 
 	for _, want := range []string{
-		"gitea      daily     2 hours ago  FAILED   48s   in 4 hours",
+		"gitea      daily     2 hours ago  FAILED (1 of 2 ok)  48s   in 4 hours",
 		"  nas: ok (snapshot a1b2c3d4)",
 		"  offsite: backup failed: restic backup failed: exit status 3",
 	} {

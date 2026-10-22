@@ -3,9 +3,7 @@
 ## Purpose
 
 Defines the scheduler-agnostic, daemon-free scheduling model: a single `tick` entry point that determines which jobs are due by comparing policy schedules against persisted last-run state, so any external periodic trigger can drive rest-o-matic without it needing to understand cron, systemd, or any other OS scheduler.
-
 ## Requirements
-
 ### Requirement: Tick as the Sole Scheduling Entry Point
 The system SHALL NOT run as a persistent background process, and SHALL NOT create, modify, or otherwise manage OS-level scheduler entries (e.g. crontab lines, systemd timers). Scheduled evaluation of jobs SHALL occur only when a `tick` invocation runs, exits, and returns control to whatever external mechanism invoked it.
 
@@ -52,7 +50,7 @@ For each job execution, whether started by `tick` or by `run`, the state file SH
 - its outcome;
 - how it was started (`tick` or `run`);
 - a one-line description of its first failure, empty on success; and
-- for each repository the execution attempted, the result (succeeded, backup failed, or retention enforcement failed), the error for a failed result, and the ID of the snapshot created, if any.
+- for each repository the execution attempted, the result (succeeded, unreachable, backup failed, or retention enforcement failed), the error for a result other than succeeded, and the ID of the snapshot created, if any.
 
 #### Scenario: Successful run records snapshot IDs
 - **WHEN** the `documents` job backs up to `nas` and `offsite` and both succeed
@@ -61,6 +59,10 @@ For each job execution, whether started by `tick` or by `run`, the state file SH
 #### Scenario: Partly failed run records which repository failed
 - **WHEN** the `gitea` job succeeds on `nas` and its backup to `offsite` fails
 - **THEN** its record SHALL show a failed outcome, a succeeded result with a snapshot ID for `nas`, a backup-failed result with the error for `offsite`, and a one-line error naming `offsite`
+
+#### Scenario: Unreachable repository is recorded as such
+- **WHEN** the `config` job succeeds on `ut-g5` and finds `s3` unreachable
+- **THEN** its record SHALL show a failed outcome, a succeeded result with a snapshot ID for `ut-g5`, and an unreachable result with its error and no snapshot ID for `s3`
 
 #### Scenario: Before-hook failure records no repositories
 - **WHEN** a job's `before` hook fails
@@ -116,3 +118,4 @@ A state file written by an earlier version, holding only each job's last run tim
 #### Scenario: Earlier record is still shown
 - **WHEN** `status` is run against a state file written by an earlier version
 - **THEN** each job SHALL be shown with its last run time and outcome, and with no duration or error
+

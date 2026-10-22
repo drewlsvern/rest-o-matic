@@ -23,6 +23,13 @@
 # change of phase. Defaults to 5m if omitted.
 # progress_interval: 5m
 
+# How long each repository may take to open before a backup to it. Past
+# that it is recorded as unreachable and the job moves on to its next
+# repository, instead of waiting out restic's own retries (about 14 minutes).
+# A duration like 30s, 2m or 1h, at least 10s; 0 skips the check. A
+# repository can set its own. Defaults to 2m if omitted.
+# connect_timeout: 2m
+
 # ---------------------------------------------------------------------------
 # Policies: named, reusable schedule + retention. Referenced by name from a
 # job's `policy:` field. A job may override individual retention keys
@@ -93,6 +100,7 @@
 #     backend: s3
 #     url: "s3:https://s3.example.com/my-bucket/restic-repo"
 #     password_command: "pass show restic/offsite"
+#     connect_timeout: 1m     # overrides the top-level connect_timeout
 #
 #     # Arbitrary extra environment variables to pass to restic - e.g.
 #     # backend-specific credentials. Any key/value pairs are accepted.
@@ -175,7 +183,9 @@
 #       #
 #       # Hooks get RESTOMATIC_JOB; success/failure also get
 #       # RESTOMATIC_OUTCOME (success|failure), RESTOMATIC_FAILED_REPOS
-#       # (comma-separated) and RESTOMATIC_ERROR (first failure, one line).
+#       # (comma-separated, unreachable ones included),
+#       # RESTOMATIC_UNREACHABLE_REPOS (only those that couldn't be opened in
+#       # time) and RESTOMATIC_ERROR (first failure, one line).
 #       #
 #       # Hooks run through `sh -c` on Linux/macOS and `cmd.exe` on Windows,
 #       # so use that shell's syntax (e.g. %RESTOMATIC_JOB% on Windows).

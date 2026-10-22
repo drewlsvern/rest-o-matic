@@ -98,7 +98,7 @@ func (p *progressPrinter) Phase(job string, ph execution.Phase) {
 		p.jobs[job] = jp
 		p.order = append(p.order, job)
 	}
-	jp.cur = execution.PhaseProgress(ph)
+	jp.cur = execution.PhaseProgress(ph, now)
 	jp.lastTimed = now
 	if p.terminal {
 		p.redraw(now)
@@ -131,6 +131,27 @@ func (p *progressPrinter) BackupStatus(job string, s execution.BackupStatus) {
 		jp.lastTimed = now
 		p.line(now, job, jp)
 	}
+}
+
+// Retry records one of restic's retry messages for a job, and shows it at
+// once: on a terminal by redrawing, otherwise as a line of its own.
+func (p *progressPrinter) Retry(job, message string) {
+	if p == nil {
+		return
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	jp, ok := p.jobs[job]
+	if !ok {
+		return
+	}
+	now := p.now()
+	execution.ApplyRetry(&jp.cur, message, now)
+	if p.terminal {
+		p.redraw(now)
+		return
+	}
+	p.line(now, job, jp)
 }
 
 // Done takes a finished job off the terminal line.
