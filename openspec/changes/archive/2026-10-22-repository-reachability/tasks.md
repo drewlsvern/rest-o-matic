@@ -36,4 +36,4 @@
 - [x] 6.2 Docs: `docs/configuration.md` (`connect_timeout`, why local repositories are checked too), `docs/status.md` (unreachable, the count, retrying, no report yet, throughput and what it measures), `docs/notifications.md` and the hooks docs (`RESTOMATIC_UNREACHABLE_REPOS`), `docs/cli.md` (progress lines), the example config
 - [x] 6.3 UI repo handoff: `unreachable` result, `RESTOMATIC_UNREACHABLE_REPOS`, new progress fields (not sent in the check-in)
 - [x] 6.4 By hand: a job with an unreachable S3 repository and a local one, watched through `status` and a redirected log; run the new tests with restic 0.16.4
-- [ ] 6.5 `go test ./...` and `go vet ./...` (also `GOOS=windows`) pass locally, and CI is green
+- [x] 6.5 `go test ./...` and `go vet ./...` (also `GOOS=windows`) pass locally, and CI is green (PR #33: build and windows green)
